@@ -246,7 +246,7 @@ export function setupInvoiceAuditor(bot: Telegraf) {
     const recebedorName = ctx.from.first_name;
     await supabase.from('receiving_logs').update({ physical_receipt_at: new Date().toISOString() }).eq('id', ticket.id);
 
-    await ctx.reply(`✅ **Recebimento físico confirmado por ${recebedorName}!** O vídeo bolinha foi registrado.`, { parse_mode: 'Markdown', reply_to_message_id: ctx.message.message_id });
+    await ctx.reply(`✅ **Recebimento físico confirmado por ${recebedorName}!** O vídeo bolinha foi registrado.`, { parse_mode: 'Markdown', reply_parameters: { message_id: ctx.message.message_id } });
 
     await checkReadyForAnalysis(bot, ticket.id);
   });
