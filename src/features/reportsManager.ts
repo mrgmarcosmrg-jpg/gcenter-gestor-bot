@@ -1,0 +1,365 @@
+import { Telegraf } from 'telegraf';
+import cron from 'node-cron';
+import { supabase } from '../database/db';
+
+// --- Utilitários de Tempo ---
+function calculateSLA(start: string, end: string): number {
+   const d1 = new Date(start).getTime();
+   const d2 = new Date(end).getTime();
+   return Math.max(0, d2 - d1);
+}
+
+function formatDuration(ms: number): string {
+   const hours = Math.floor(ms / (1000 * 60 * 60));
+   const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+   if (hours > 0) return `${hours}h ${minutes}m`;
+   return `${minutes}m`;
+}
+
+function getEfficiency(total: number, errors: number): number {
+   if (total === 0) return 100;
+   return Math.round(((total - errors) / total) * 100);
+}
+
+function formatTicketLink(ticket: any): string {
+   if (ticket.chat_id && ticket.recebimento_thread_id) {
+      const chatStr = ticket.chat_id.toString().replace('-100', '');
+      return `[#${ticket.id}](https://t.me/c/${chatStr}/${ticket.recebimento_thread_id})`;
+   }
+   return `#${ticket.id}`;
+}
+
+export function setupReportsManager(bot: Telegraf) {
+   // Cadastro de Gerente e Subgerente
+   bot.command(['sou_gerente', 'sou_subgerente'], async (ctx) => {
+      if (ctx.chat.type !== 'private') return ctx.reply('⚠️ Por favor, use este comando no meu privado!');
+      const isSub = ctx.message.text.startsWith('/sou_subgerente');
+      const roleName = isSub ? 'subgerente' : 'gerente';
+      
+      const match = ctx.message.text.match(/^\/sou_(?:sub)?gerente\s+(.+)/i);
+      if (!match) return ctx.reply(`⚠️ Como usar: /sou_${roleName} Nome da Loja\nExemplo: /sou_${roleName} GCenter 15`);
+      
+      const storeName = match[1].trim();
+      const { data: group } = await supabase.from('groups_config').select('*').ilike('store_name', storeName).single();
+      if (!group) return ctx.reply(`❌ Não encontrei nenhuma loja configurada com o nome "${storeName}".`);
+
+      await registerPendingRole(bot, ctx, roleName, group.store_name);
+   });
+
+   // Cadastro de Supervisor
+   bot.command('sou_supervisor', async (ctx) => {
+      if (ctx.chat.type !== 'private') return;
+      await registerPendingRole(bot, ctx, 'supervisor');
+   });
+
+   // Cadastro de Diretor
+   bot.command(['sou_diretor', 'sou_diretor_operacional_751809', 'sou_diretor_administrativo', 'sou_diretor_financeiro', 'sou_diretor_comercial'], async (ctx) => {
+      if (ctx.chat.type !== 'private') return;
+      const match = ctx.message.text.match(/^\/sou_diretor[_\s]+(?:(operacional_751809)|(administrativo|financeiro|comercial))/i);
+      if (!match) return ctx.reply('⚠️ Como usar: /sou_diretor [administrativo | financeiro | comercial]\n(Acesso operacional requer senha autorizada).');
+      
+      let setor = (match[1] || match[2]).toLowerCase();
+      
+      // Mapear de volta para 'operacional' puro internamente para o banco de dados
+      if (setor === 'operacional_751809') setor = 'operacional';
+      // O diretor operacional não precisa de aprovação se estiver configurando a si mesmo (mas vamos usar o fluxo normal para todos por segurança)
+      await registerPendingRole(bot, ctx, `diretor_${setor}`);
+   });
+
+   // Comando para Sair (Unsubscribe)
+   bot.command(['sair_relatorios', 'sair'], async (ctx) => {
+      if (ctx.chat.type !== 'private') return;
+      const { data: user } = await supabase.from('user_roles').select('*').eq('telegram_id', ctx.chat.id.toString()).single();
+      if (!user) return ctx.reply('⚠️ Você já não está cadastrado em nenhum cargo para receber relatórios.');
+
+      await supabase.from('user_roles').delete().eq('telegram_id', ctx.chat.id.toString());
+      return ctx.reply('📴 Tudo bem! Seu cargo foi removido e você não receberá mais os relatórios automáticos no seu privado.');
+   });
+
+   // Handlers para os botões de aprovação
+   bot.action(/^approve_role_(.+)$/, async (ctx) => {
+      const targetId = ctx.match[1];
+      await supabase.from('user_roles').update({ status: 'approved' }).eq('telegram_id', targetId);
+      
+      await ctx.editMessageText(`✅ **Acesso Aprovado!**\nO usuário teve seu acesso liberado com sucesso.`, { parse_mode: 'Markdown' });
+      await bot.telegram.sendMessage(targetId, '🎉 **Acesso Aprovado!**\nA Diretoria aprovou sua solicitação. Você passará a receber os relatórios confidenciais.', { parse_mode: 'Markdown' }).catch(()=>{});
+   });
+
+   bot.action(/^reject_role_(.+)$/, async (ctx) => {
+      const targetId = ctx.match[1];
+      await supabase.from('user_roles').delete().eq('telegram_id', targetId);
+      
+      await ctx.editMessageText(`❌ **Acesso Recusado.**\nO pedido do usuário foi negado e deletado do sistema.`, { parse_mode: 'Markdown' });
+      await bot.telegram.sendMessage(targetId, '❌ **Acesso Negado.**\nSua solicitação de acesso aos relatórios foi recusada pela Diretoria.', { parse_mode: 'Markdown' }).catch(()=>{});
+   });
+
+   // Comando de teste (Dispara relatórios para a própria pessoa com base no cargo dela)
+   bot.command('testar_relatorios', async (ctx) => {
+      if (ctx.chat.type !== 'private') return;
+      const { data: user } = await supabase.from('user_roles').select('*').eq('telegram_id', ctx.chat.id.toString()).single();
+      if (!user) return ctx.reply('⚠️ Você não tem nenhum cargo registrado. Use os comandos de cadastro primeiro.');
+      if (user.status !== 'approved') return ctx.reply('⏳ Seu cadastro ainda está aguardando aprovação da Diretoria Operacional.');
+      
+      await ctx.reply('⏳ Gerando e enviando relatórios de teste...');
+      
+      if (user.role === 'gerente' || user.role === 'subgerente') {
+         await runMorningReport(bot, user);
+         await runEveningReport(bot, user);
+         await runWeeklyReport(bot, user);
+      } else {
+         await runNetworkEveningReport(bot, user);
+      }
+      await ctx.reply('✅ Disparos concluídos!');
+   });
+
+   // CRON JOBS (Filtrando apenas approved)
+   cron.schedule('0 8 * * 1-6', async () => {
+      const { data: users } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['gerente', 'subgerente']);
+      if (users) for (const user of users) await runMorningReport(bot, user);
+   }, { timezone: "America/Sao_Paulo" });
+
+   cron.schedule('0 18 * * 1-5', async () => {
+      const { data: usersStore } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['gerente', 'subgerente']);
+      if (usersStore) for (const user of usersStore) await runEveningReport(bot, user);
+      
+      const { data: usersNetwork } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['supervisor', 'diretor_operacional', 'diretor_administrativo', 'diretor_financeiro', 'diretor_comercial']);
+      if (usersNetwork) for (const user of usersNetwork) await runNetworkEveningReport(bot, user);
+   }, { timezone: "America/Sao_Paulo" });
+
+   cron.schedule('0 10 * * 6', async () => { // Sabado as 10h para o placar semanal
+      const { data: usersStore } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['gerente', 'subgerente']);
+      if (usersStore) for (const user of usersStore) await runWeeklyReport(bot, user);
+   }, { timezone: "America/Sao_Paulo" });
+}
+
+async function registerPendingRole(bot: Telegraf, ctx: any, role: string, storeName: string | null = null) {
+   const telegramId = ctx.chat.id.toString();
+   const name = ctx.from.first_name;
+
+   const autoApprove = (role === 'diretor_operacional');
+
+   await supabase.from('user_roles').delete().eq('telegram_id', telegramId);
+   
+   await supabase.from('user_roles').insert({
+      telegram_id: telegramId,
+      name: name,
+      role: role,
+      store_name: storeName,
+      status: autoApprove ? 'approved' : 'pending'
+   });
+
+   if (autoApprove) {
+      return ctx.reply(`✅ Olá ${name}! Você foi registrado como **DIRETOR OPERACIONAL**.\nSendo o administrador mestre, seu acesso foi auto-aprovado.`, { parse_mode: 'Markdown' });
+   }
+
+   await ctx.reply(`⏳ Seu pedido para atuar como **${role.toUpperCase()}** foi enviado para a Diretoria Operacional.\n\nVocê começará a receber os relatórios assim que o acesso for aprovado!`, { parse_mode: 'Markdown' });
+
+   const { data: diretores } = await supabase.from('user_roles').select('*').eq('role', 'diretor_operacional').eq('status', 'approved');
+   
+   if (diretores && diretores.length > 0) {
+      const location = storeName ? `\n📍 *Loja:* ${storeName}` : '';
+      const msg = `🚨 **Novo Pedido de Acesso!**\n\n👤 *Usuário:* ${name}\n💼 *Cargo Solicitado:* ${role.toUpperCase()}${location}\n\nDeseja autorizar esta pessoa a receber os relatórios confidenciais?`;
+      
+      for (const dir of diretores) {
+         await bot.telegram.sendMessage(dir.telegram_id, msg, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+               inline_keyboard: [[
+                  { text: '✅ Aprovar', callback_data: `approve_role_${telegramId}` },
+                  { text: '❌ Recusar', callback_data: `reject_role_${telegramId}` }
+               ]]
+            }
+         }).catch(()=>{});
+      }
+   }
+}
+
+// ----------------------------------------------------
+// RELATÓRIOS POR LOJA (Gerente / Subgerente)
+// ----------------------------------------------------
+async function runMorningReport(bot: Telegraf, user: any) {
+   const today = new Date();
+   today.setHours(0,0,0,0);
+   const nowMs = Date.now();
+   const { data: pendings } = await supabase.from('receiving_logs')
+      .select('*')
+      .eq('store_name', user.store_name)
+      .in('status', ['pendente', 'aguardando_justificativa', 'album_pending'])
+      .lt('created_at', today.toISOString());
+      
+   if (pendings && pendings.length > 0) {
+      let msg = `🌅 *Bom dia, ${user.name}!*\nSua loja (**${user.store_name}**) iniciou o dia com **${pendings.length} pendências** antigas:\n\n`;
+      pendings.forEach(p => {
+         const op = (p.operation_type || 'COMPRA').toUpperCase();
+         const waitingTime = formatDuration(nowMs - new Date(p.created_at).getTime());
+         msg += `⏳ *${formatTicketLink(p)}* - ${p.supplier || 'Sem fornecedor'} [${op}]\n   └ Parado há: _${waitingTime}_\n`;
+      });
+      msg += `\n🎯 *Meta:* Tente zerar essas pendências logo cedo!`;
+      await bot.telegram.sendMessage(user.telegram_id, msg, { parse_mode: 'Markdown' }).catch(()=>{});
+   } else {
+      await bot.telegram.sendMessage(user.telegram_id, `🌅 *Bom dia, ${user.name}!*\nSua loja (**${user.store_name}**) não tem nenhuma pendência de dias anteriores! Excelente trabalho! 🚀`, { parse_mode: 'Markdown' }).catch(()=>{});
+   }
+}
+
+async function runEveningReport(bot: Telegraf, user: any) {
+   const today = new Date();
+   today.setHours(0,0,0,0);
+   const tomorrow = new Date(today);
+   tomorrow.setDate(tomorrow.getDate() + 1);
+   const { data: todayLogs } = await supabase.from('receiving_logs')
+      .select('*')
+      .eq('store_name', user.store_name)
+      .gte('created_at', today.toISOString())
+      .lt('created_at', tomorrow.toISOString());
+      
+   if (todayLogs && todayLogs.length > 0) {
+      const transfers = todayLogs.filter(l => l.operation_type === 'transferencia');
+      const errors = transfers.filter(l => l.type === 'divergencia');
+      const efficiency = getEfficiency(transfers.length, errors.length);
+      
+      let msg = `📊 *Fechamento Diário - ${user.store_name}*\n\n`;
+      msg += `📦 Operações processadas hoje: **${todayLogs.length}**\n`;
+      msg += `🔄 Transferências: **${transfers.length}**\n`;
+      msg += `🎯 Eficiência Diária: **${efficiency}%** (Acertos de primeira)\n\n`;
+      
+      if (errors.length > 0) {
+         msg += `⚠️ *Você teve ${errors.length} transferências SEM BONO (ou com ressalvas):*\n`;
+         errors.forEach(e => {
+            const justif = e.conclusion_observation ? e.conclusion_observation : (e.conclusion_status || 'Sem justificativa');
+            msg += `- ${formatTicketLink(e)}: _${justif}_\n`;
+         });
+      } else {
+         msg += `🌟 *PARABÉNS!* Todas as transferências de hoje deram certo de primeira!`;
+      }
+      await bot.telegram.sendMessage(user.telegram_id, msg, { parse_mode: 'Markdown' }).catch(()=>{});
+   }
+}
+
+async function runWeeklyReport(bot: Telegraf, user: any) {
+   const today = new Date();
+   const lastWeek = new Date(today);
+   lastWeek.setDate(lastWeek.getDate() - 7);
+   
+   const { data: weekLogs } = await supabase.from('receiving_logs')
+      .select('*')
+      .eq('store_name', user.store_name)
+      .gte('created_at', lastWeek.toISOString());
+      
+   if (!weekLogs || weekLogs.length === 0) return;
+
+   const transfers = weekLogs.filter(l => l.operation_type === 'transferencia');
+   const errors = transfers.filter(l => l.type === 'divergencia');
+   const efficiency = getEfficiency(transfers.length, errors.length);
+   const pendings = weekLogs.filter(l => ['pendente', 'aguardando_justificativa', 'album_pending'].includes(l.status));
+   
+   // Calcular Tempo Médio de Resolução (SLA) para logs que tiveram divergência e foram resolvidos
+   const resolvedErrors = errors.filter(e => e.resolved_at);
+   let avgSlaText = 'N/A';
+   if (resolvedErrors.length > 0) {
+      let totalSlaMs = 0;
+      resolvedErrors.forEach(e => {
+         totalSlaMs += calculateSLA(e.created_at, e.resolved_at);
+      });
+      avgSlaText = formatDuration(totalSlaMs / resolvedErrors.length);
+   }
+
+   let msg = `🏆 *PLACAR SEMANAL - ${user.store_name}* 🏆\n`;
+   msg += `_Resumo dos últimos 7 dias_\n\n`;
+   msg += `📦 Total Processado: **${weekLogs.length}**\n`;
+   msg += `✅ **Taxa de Acertos de Primeira:** **${efficiency}%**\n`;
+   msg += `⏱️ **Tempo Médio de Resolução:** ${avgSlaText}\n`;
+   msg += `⚠️ Pendências Acumuladas: **${pendings.length}**\n\n`;
+   
+   if (efficiency >= 95) {
+      msg += `🚀 *Que semana incrível!* A loja rodou super redonda. Parabéns à equipe!`;
+   } else if (efficiency >= 80) {
+      msg += `👍 *Semana produtiva!* Mas podemos melhorar a atenção nas transferências para aumentar a taxa de acertos.`;
+   } else {
+      msg += `🚨 *Atenção!* A taxa de erros nas transferências está alta. Precisamos treinar mais os repositores e conferentes.`;
+   }
+   
+   await bot.telegram.sendMessage(user.telegram_id, msg, { parse_mode: 'Markdown' }).catch(()=>{});
+}
+
+// ----------------------------------------------------
+// RELATÓRIOS CONSOLIDADOS (Supervisor / Diretores)
+// ----------------------------------------------------
+async function runNetworkEveningReport(bot: Telegraf, user: any) {
+   const today = new Date();
+   today.setHours(0,0,0,0);
+   const tomorrow = new Date(today);
+   tomorrow.setDate(tomorrow.getDate() + 1);
+   
+   const { data: todayLogs } = await supabase.from('receiving_logs')
+      .select('*')
+      .gte('created_at', today.toISOString())
+      .lt('created_at', tomorrow.toISOString());
+      
+   if (!todayLogs) return;
+
+   const pendings = todayLogs.filter(l => ['pendente', 'aguardando_justificativa', 'album_pending'].includes(l.status));
+   const transfers = todayLogs.filter(l => l.operation_type === 'transferencia');
+   const errors = transfers.filter(l => l.type === 'divergencia');
+   const efficiency = getEfficiency(transfers.length, errors.length);
+
+   let msg = '';
+   
+   if (user.role === 'supervisor' || user.role === 'diretor_operacional') {
+      msg += `📊 *Boletim Operacional Consolidado (Hoje)*\n\n`;
+      msg += `A rede toda gerou **${todayLogs.length} operações**.\n`;
+      msg += `Tivemos **${transfers.length} Transferências**, com eficiência geral de **${efficiency}%**.\n\n`;
+      
+      // Ranking de erros (mais errou)
+      const storeErrors: Record<string, number> = {};
+      errors.forEach(e => { storeErrors[e.store_name] = (storeErrors[e.store_name] || 0) + 1; });
+      const sortedStores = Object.entries(storeErrors).sort((a,b)=>b[1]-a[1]);
+      
+      if (sortedStores.length > 0) {
+         msg += `🏆 *Lojas com mais ressalvas (Foco para Treinamento):*\n`;
+         sortedStores.slice(0, 3).forEach(([store, count], i) => {
+            msg += `🚨 ${i+1}º - ${store} (${count} erros)\n`;
+         });
+      } else {
+         msg += `🌟 *Rede Impecável!* Nenhuma ressalva registrada hoje.\n`;
+      }
+      
+      // Ranking de lentidão (Lojas com pendências abertas há mais tempo)
+      if (pendings.length > 0) {
+         const now = Date.now();
+         msg += `\n⏱️ *Radar de Lentidão (Pendências mais velhas):*\n`;
+         const sortedPendings = [...pendings].sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+         sortedPendings.slice(0, 3).forEach(p => {
+             const age = formatDuration(now - new Date(p.created_at).getTime());
+             msg += `- ${p.store_name} (Nota ${formatTicketLink(p)}) está parada há ${age}\n`;
+         });
+      }
+   }
+   else if (user.role === 'diretor_financeiro') {
+      let totalValuePending = 0;
+      pendings.forEach(p => { if(p.invoice_value) totalValuePending += p.invoice_value; });
+      
+      msg += `💰 *Boletim Financeiro (Pendências)*\n\n`;
+      msg += `Hoje tivemos **${todayLogs.length} operações** na rede.\n`;
+      msg += `Atualmente temos **${pendings.length} tickets parados** aguardando alguma ação.\n`;
+      msg += `Valor total estimado retido: **R$ ${totalValuePending.toFixed(2)}**.\n`;
+   }
+   else if (user.role === 'diretor_comercial') {
+      const purchases = todayLogs.filter(l => l.operation_type !== 'transferencia');
+      const errPurchases = purchases.filter(l => l.type === 'divergencia');
+      const purchEff = getEfficiency(purchases.length, errPurchases.length);
+      
+      msg += `🤝 *Boletim Comercial (Fornecedores)*\n\n`;
+      msg += `Hoje recebemos **${purchases.length} notas de compras externas**.\n`;
+      msg += `Eficiência de Entrega (Sem divergência): **${purchEff}%**\n`;
+   }
+   else if (user.role === 'diretor_administrativo') {
+      msg += `🏢 *Visão Administrativa Geral*\n\n`;
+      msg += `Total de Movimentações Registradas: **${todayLogs.length}**\n`;
+      msg += `Tickets Pendentes de Solução: **${pendings.length}**\n`;
+      msg += `Eficiência Operacional da Rede: **${efficiency}%**\n`;
+   }
+   
+   if (msg) {
+      await bot.telegram.sendMessage(user.telegram_id, msg, { parse_mode: 'Markdown' }).catch(()=>{});
+   }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "gcenter-gestor-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/bot.js",
+  "scripts": {
+    "start": "node dist/bot.js",
+    "build": "tsc",
+    "dev": "tsx src/bot.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.111.0",
+    "dotenv": "^17.4.2",
+    "node-cron": "^4.6.0",
+    "node-fetch": "^2.7.0",
+    "telegraf": "^4.16.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  }
+}
