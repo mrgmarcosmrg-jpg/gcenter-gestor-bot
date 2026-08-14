@@ -63,6 +63,20 @@ setupGatekeeper(bot);
 async function start() {
   await setupDatabase();
   
+  // ==========================================
+  // DUMMY HTTP SERVER PARA O RENDER (PLANO GRÁTIS)
+  // O Render exige que um "Web Service" escute numa porta
+  // ==========================================
+  const http = require('http');
+  const port = process.env.PORT || 3000;
+  http.createServer((req: any, res: any) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.write('Bot do GCenter esta rodando perfeitamente!');
+    res.end();
+  }).listen(port, () => {
+    console.log(`🌐 Servidor HTTP fake escutando na porta ${port} para o Render...`);
+  });
+  
   // Configura o botão de "Menu" do Telegram com os comandos (sem await para não travar)
   bot.telegram.setMyCommands([
     { command: 'duvida', description: 'Fazer uma pergunta direcionada (@usuario texto)' },
