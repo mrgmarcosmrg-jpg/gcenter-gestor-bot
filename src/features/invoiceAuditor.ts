@@ -159,9 +159,6 @@ export function setupInvoiceAuditor(bot: Telegraf) {
                 await bot.telegram.sendPhoto(faturamentoChatId, photoId, {
                    caption: `👷‍♂️ *${senderName} (Loja):*\n${text}`, message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown'
                 });
-             } else if ('video_note' in ctx.message) {
-                const fileId = ctx.message.video_note.file_id;
-                await bot.telegram.sendVideoNote(faturamentoChatId, fileId, { message_thread_id: parseInt(ticket.thread_id) });
              } else if ('video' in ctx.message) {
                 const fileId = ctx.message.video.file_id;
                 await bot.telegram.sendVideo(faturamentoChatId, fileId, { caption: `👷‍♂️ *${senderName} (Loja):*\n${text}`, message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' });
@@ -247,6 +244,15 @@ export function setupInvoiceAuditor(bot: Telegraf) {
     await supabase.from('receiving_logs').update({ physical_receipt_at: new Date().toISOString() }).eq('id', ticket.id);
 
     await ctx.reply(`✅ **Recebimento físico confirmado por ${recebedorName}!** O vídeo bolinha foi registrado.`, { parse_mode: 'Markdown', reply_parameters: { message_id: ctx.message.message_id } });
+
+    if (ticket.thread_id) {
+       const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
+       if (fatGroups && fatGroups.length > 0) {
+           const faturamentoChatId = fatGroups[0].chat_id;
+           await bot.telegram.sendVideoNote(faturamentoChatId, ctx.message.video_note.file_id, { message_thread_id: parseInt(ticket.thread_id) }).catch(()=>{});
+           await bot.telegram.sendMessage(faturamentoChatId, `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' }).catch(()=>{});
+       }
+    }
 
     await checkReadyForAnalysis(bot, ticket.id);
   });
