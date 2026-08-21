@@ -670,8 +670,7 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
     const faturamentoChatId = fatGroups[0].chat_id;
 
     const op = (ticket.operation_type || 'COMPRA').toUpperCase();
-    const isTransfSemBono = ticket.operation_type === 'transferencia' && ticket.type === 'divergencia';
-    const goesToAnalyst = ticket.type === 'sucesso' || isTransfSemBono;
+    const isSemBono = ticket.type === 'divergencia';
 
     const topicName = `🔵 Ticket #${ticketId} - ${ticket.supplier} [${op}]`;
     const topic = await bot.telegram.createForumTopic(faturamentoChatId, topicName).catch(()=>null);
@@ -685,14 +684,8 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
        await bot.telegram.editForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id), { name: topicName }).catch(()=>{});
     }
 
-    let summary = '';
-    if (goesToAnalyst) {
-       const subtitle = isTransfSemBono ? '(Sem Bono)' : '(Com Bono)';
-       summary = `🟢 *NOVA APURAÇÃO ${subtitle} - #${ticketId} [${op}]*\n_Atenção Analista de Faturamento_\n\n`;
-    } else {
-       summary = `🔴 *LANÇAR BONO (Sem Bono) - #${ticketId} [${op}]*\n_Atenção Faturistas_\n\n`;
-    }
-    summary += `🏬 *Loja:* ${ticket.store_name}\n👤 *Recebedor:* ${ticket.requester_name}\n🏷 *Fornecedor:* ${ticket.supplier}\n💰 *Valor:* R$ ${ticket.invoice_value}\n`;
+    const subtitle = isSemBono ? '(Sem Bono)' : '(Com Bono)';
+    const summary = `🔴 *NOVA APURAÇÃO ${subtitle} - #${ticketId} [${op}]*\n_Atenção Faturistas_\n\n🏬 *Loja:* ${ticket.store_name}\n👤 *Recebedor:* ${ticket.requester_name}\n🏷 *Fornecedor:* ${ticket.supplier}\n💰 *Valor:* R$ ${ticket.invoice_value}\n`;
 
     await bot.telegram.sendMessage(faturamentoChatId, summary, { message_thread_id: threadId, parse_mode: 'Markdown' });
 
@@ -704,21 +697,12 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
       }
     }
 
-    const inline_keyboard = goesToAnalyst
-       ? []
-       : [[{ text: '✋ Assumir Lançamento', callback_data: `assume_nf_${ticketId}` }]];
+    const inline_keyboard = [[{ text: '✋ Assumir Apuração', callback_data: `assume_nf_${ticketId}` }]];
 
-    if (inline_keyboard.length > 0) {
-        await bot.telegram.sendMessage(faturamentoChatId, `👆 Escolha uma ação:`, {
-          message_thread_id: threadId,
-          reply_markup: { inline_keyboard }
-        });
-    } else {
-        await bot.telegram.sendMessage(faturamentoChatId, `⏳ Aguardando o Recebedor enviar o **Vídeo Bolinha** (Recebimento Físico) para liberar a apuração.`, {
-          message_thread_id: threadId,
-          parse_mode: 'Markdown'
-        });
-    }
+    await bot.telegram.sendMessage(faturamentoChatId, `👆 Escolha uma ação:`, {
+      message_thread_id: threadId,
+      reply_markup: { inline_keyboard }
+    });
 
     await checkReadyForAnalysis(bot, ticketId);
   } catch (e) {
@@ -730,7 +714,7 @@ async function checkReadyForAnalysis(bot: Telegraf, ticketId: number) {
     const { data: ticket } = await supabase.from('receiving_logs').select('*').eq('id', ticketId).single();
     if (!ticket || ticket.analyst_notified || !ticket.thread_id) return;
 
-    const isBonoReady = (ticket.type === 'sucesso' || (ticket.operation_type === 'transferencia' && ticket.type === 'divergencia') || ticket.bono_sent);
+    const isBonoReady = ticket.bono_sent;
     const isVideoReady = !!ticket.physical_receipt_at;
 
     if (isBonoReady && isVideoReady) {
