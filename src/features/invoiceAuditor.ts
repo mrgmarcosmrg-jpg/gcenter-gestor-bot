@@ -251,7 +251,11 @@ export function setupInvoiceAuditor(bot: Telegraf) {
            const faturamentoChatId = fatGroups[0].chat_id;
            try {
               const fileLink = await bot.telegram.getFileLink(ctx.message.video_note.file_id);
-              await bot.telegram.sendVideo(faturamentoChatId, fileLink.href, {
+              const response = await fetch(fileLink.href);
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+
+              await bot.telegram.sendVideo(faturamentoChatId, { source: buffer, filename: 'bolinha.mp4' }, {
                  message_thread_id: parseInt(ticket.thread_id),
                  caption: `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)\n*(Convertido para vídeo normal para funcionar no Telegram Web)*`,
                  parse_mode: 'Markdown'
