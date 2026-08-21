@@ -249,7 +249,11 @@ export function setupInvoiceAuditor(bot: Telegraf) {
        const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
        if (fatGroups && fatGroups.length > 0) {
            const faturamentoChatId = fatGroups[0].chat_id;
-           await bot.telegram.sendVideoNote(faturamentoChatId, ctx.message.video_note.file_id, { message_thread_id: parseInt(ticket.thread_id) }).catch(()=>{});
+           try {
+              await bot.telegram.copyMessage(faturamentoChatId, chatId, ctx.message.message_id, { message_thread_id: parseInt(ticket.thread_id) });
+           } catch (e) {
+              console.error('ERRO AO COPIAR VIDEO BOLINHA:', e);
+           }
            await bot.telegram.sendMessage(faturamentoChatId, `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' }).catch(()=>{});
        }
     }
