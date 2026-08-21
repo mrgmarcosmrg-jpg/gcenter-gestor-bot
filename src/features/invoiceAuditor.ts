@@ -137,6 +137,18 @@ export function setupInvoiceAuditor(bot: Telegraf) {
            const fileId = ctx.message.document.file_id;
            await bot.telegram.sendDocument(ticket.chat_id, fileId, { caption: `👩‍💻 *${senderName}:*\n${text}`, message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown' });
         }
+
+        if (ticket.status === 'aguardando_bono') {
+           await supabase.from('receiving_logs').update({ status: 'em_andamento' }).eq('id', ticket.id);
+           const msg = await bot.telegram.sendMessage(ctx.chat.id, `✅ **BONO REGISTRADO!**\n\nFaturista, agora você já pode passar a bola para a Analista de Faturamento:`, {
+              message_thread_id: ctx.message.message_thread_id,
+              parse_mode: 'Markdown',
+              reply_markup: {
+                 inline_keyboard: [[{ text: `✅ Bono Criado (Passar p/ Analista)`, callback_data: `bono_sent_${ticket.id}` }]]
+              }
+           });
+           await bot.telegram.pinChatMessage(ctx.chat.id, msg.message_id).catch(()=>{});
+        }
       }
       return next();
     }
@@ -455,14 +467,23 @@ export function setupInvoiceAuditor(bot: Telegraf) {
            const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
            if (fatGroups && fatGroups.length > 0) {
              const faturamentoChatId = fatGroups[0].chat_id;
-               const msg = await bot.telegram.sendMessage(faturamentoChatId, `📌 **TICKET ASSUMIDO POR ${resolverName}**\n\nFaturista, após enviar o número do bono no chat, clique no botão abaixo para passar a bola para a Analista de Faturamento:`, {
-                 message_thread_id: parseInt(ticket.thread_id),
-                 parse_mode: 'Markdown',
-                 reply_markup: {
-                   inline_keyboard: [[{ text: `✅ Bono Enviado (Passar p/ Analista)`, callback_data: `bono_sent_${ticketId}` }]]
-               }
-             });
-             await bot.telegram.pinChatMessage(faturamentoChatId, msg.message_id).catch(()=>{});
+             if (ticket.type === 'sucesso') {
+                const msg = await bot.telegram.sendMessage(faturamentoChatId, `📌 **TICKET ASSUMIDO POR ${resolverName}**\n\nEssa nota já entrou **COM BONO**. Se estiver tudo certo no sistema, basta clicar no botão abaixo para passar a bola para a Analista:`, {
+                  message_thread_id: parseInt(ticket.thread_id),
+                  parse_mode: 'Markdown',
+                  reply_markup: {
+                    inline_keyboard: [[{ text: `✅ Tudo Certo! (Passar p/ Analista)`, callback_data: `bono_sent_${ticketId}` }]]
+                  }
+                });
+                await bot.telegram.pinChatMessage(faturamentoChatId, msg.message_id).catch(()=>{});
+             } else {
+                await supabase.from('receiving_logs').update({ status: 'aguardando_bono' }).eq('id', ticketId);
+                const msg = await bot.telegram.sendMessage(faturamentoChatId, `📌 **TICKET ASSUMIDO POR ${resolverName}**\n\nEssa nota entrou **SEM BONO**.\n\n⏳ Digite o número do Bono que você gerou aqui no chat para liberar o botão de passar para a Analista...`, {
+                  message_thread_id: parseInt(ticket.thread_id),
+                  parse_mode: 'Markdown'
+                });
+                await bot.telegram.pinChatMessage(faturamentoChatId, msg.message_id).catch(()=>{});
+             }
            }
          } catch(e) {
            console.error('Erro ao pinar', e);
