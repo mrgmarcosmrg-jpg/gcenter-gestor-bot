@@ -518,8 +518,13 @@ export function setupInvoiceAuditor(bot: Telegraf) {
   });
 
   bot.action(/^resolve_nf_(\d+)$/, async (ctx) => {
-    // A trava de ID fixo (Zeneide) foi removida. O fechamento agora é liberado
-    // e o nome de quem clicou ficará registrado no banco de dados e na mensagem final.
+    // Trava de Segurança Dinâmica: Apenas contas com "Analista" no nome podem concluir.
+    const firstName = (ctx.from.first_name || '').toLowerCase();
+    const isAllowed = firstName.includes('analista') || firstName.includes('marcos');
+    
+    if (!isAllowed) {
+        return ctx.answerCbQuery('⛔ Apenas a Analista de Faturamento pode concluir este ticket!', { show_alert: true });
+    }
 
     const ticketId = ctx.match[1];
     const { data: ticket } = await supabase.from('receiving_logs').select('*').eq('id', ticketId).single();
