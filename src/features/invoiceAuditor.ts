@@ -518,13 +518,8 @@ export function setupInvoiceAuditor(bot: Telegraf) {
   });
 
   bot.action(/^resolve_nf_(\d+)$/, async (ctx) => {
-    // Apenas Analista e Marcos (para testes) podem concluir
-    const allowedAnalysts = [5227915388]; // Zeneide
-    const isAllowed = allowedAnalysts.includes(ctx.from.id) || (ctx.from.first_name && ctx.from.first_name.includes('Marcos'));
-    
-    if (!isAllowed) {
-        return ctx.answerCbQuery('⛔ Apenas a Analista de Faturamento (Zeneide) pode concluir o ticket!', { show_alert: true });
-    }
+    // A trava de ID fixo (Zeneide) foi removida. O fechamento agora é liberado
+    // e o nome de quem clicou ficará registrado no banco de dados e na mensagem final.
 
     const ticketId = ctx.match[1];
     const { data: ticket } = await supabase.from('receiving_logs').select('*').eq('id', ticketId).single();
