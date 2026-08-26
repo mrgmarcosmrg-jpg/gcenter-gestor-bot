@@ -21,6 +21,18 @@ export function setupInvoiceAuditor(bot: Telegraf) {
       return ctx.reply('✅ Este grupo foi configurado como a CENTRAL DE FATURAMENTO.');
     }
 
+    if (lowerText.includes('/setorauditoria')) {
+      if (ctx.chat.type === 'private') return;
+      try {
+        const admins = await ctx.getChatAdministrators();
+        if (!admins.some(a => a.user.id === ctx.from.id)) return;
+      } catch (e) {
+        return ctx.reply('❌ O robô PRECISA ser Administrador deste grupo!');
+      }
+      await supabase.from('groups_config').upsert({ chat_id: ctx.chat.id.toString(), sector: 'auditoria', title: ctx.chat.title });
+      return ctx.reply('📂 Este grupo foi configurado como o ARQUIVO DE AUDITORIA.');
+    }
+
     if (lowerText.includes('/setorrecebimento')) {
       if (ctx.chat.type === 'private') return;
       try {
@@ -73,40 +85,7 @@ export function setupInvoiceAuditor(bot: Telegraf) {
             const resolverName = ticket.resolved_by || ctx.from.first_name;
             const conclusion = ticket.conclusion_status;
 
-            await supabase.from('receiving_logs').update({ 
-               status: 'resolvido', 
-               conclusion_observation: justificativa,
-               resolved_at: new Date().toISOString() 
-            }).eq('id', ticket.id);
-
-            await ctx.reply(`✅ Justificativa salva. Ticket finalizado com status: ${conclusion}!`);
-
-            // Fechar faturamento
-            if (ticket.thread_id) {
-               const op = (ticket.operation_type || 'COMPRA').toUpperCase();
-               const closedName = `✅ Ticket #${ticket.id} - ${ticket.supplier} [${op}]`;
-               await bot.telegram.editForumTopic(ctx.chat.id, parseInt(ticket.thread_id), { name: closedName }).catch(()=>{});
-               await bot.telegram.closeForumTopic(ctx.chat.id, parseInt(ticket.thread_id)).catch(()=>{});
-            }
-
-            // Fechar recebimento
-            if (ticket.chat_id && ticket.recebimento_thread_id) {
-               const msg = `✅ *TICKET CONCLUÍDO*\nFinalizado por *${resolverName}*\n\n📌 **Status:** ${conclusion}\n📝 **Observação/Ressalva:** ${justificativa}\n\nA conversa foi encerrada.`;
-               
-               const { data: grp } = await supabase.from('groups_config').select('manager_username').eq('chat_id', ticket.chat_id).single();
-               let finalMsg = msg;
-               if (ticket.operation_type === 'transferencia' && ticket.type === 'divergencia' && grp?.manager_username) {
-                  finalMsg = `${msg}\n\n🚨 **Ciente ${grp.manager_username}? Acompanhamento finalizado.**`;
-               }
-               await bot.telegram.sendMessage(ticket.chat_id, finalMsg, {
-                  message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown'
-               }).catch(()=>{});
-               var op = (ticket.operation_type || 'COMPRA').toUpperCase();
-               var closedName = `✅ Ticket #${ticket.id} - ${ticket.supplier} [${op}]`;
-               await bot.telegram.editForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id), { name: closedName }).catch(()=>{});
-               await bot.telegram.closeForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id)).catch(()=>{});
-
-            }
+            await finishTicket(bot, ticket.id, resolverName, conclusion, justificativa);
          } else {
             await ctx.reply('⚠️ Por favor, digite a justificativa em forma de TEXTO.');
          }
@@ -251,6 +230,12 @@ export function setupInvoiceAuditor(bot: Telegraf) {
 
     if (!ticket) return next();
     if (ticket.physical_receipt_at) return next();
+
+    // TRAVA: Só aceita o vídeo bolinha se a faturista já digitou o bono!
+    if (!ticket.bono_sent) {
+       await ctx.reply(`⚠️ **CALMA AÍ!** A Faturista ainda não liberou o número do Bono no sistema.\n\nPor favor, guarde a mercadoria e **aguarde a liberação dela** antes de gravar o vídeo bolinha!`, { parse_mode: 'Markdown', reply_parameters: { message_id: ctx.message.message_id } });
+       return;
+    }
 
     const recebedorName = ctx.from.first_name;
     await supabase.from('receiving_logs').update({ physical_receipt_at: new Date().toISOString() }).eq('id', ticket.id);
@@ -467,23 +452,21 @@ export function setupInvoiceAuditor(bot: Telegraf) {
            const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
            if (fatGroups && fatGroups.length > 0) {
              const faturamentoChatId = fatGroups[0].chat_id;
+             
+             await supabase.from('receiving_logs').update({ status: 'aguardando_bono' }).eq('id', ticketId);
+             
+             let promptMsg = `📌 **TICKET ASSUMIDO POR ${resolverName}**\n\n`;
              if (ticket.type === 'sucesso') {
-                const msg = await bot.telegram.sendMessage(faturamentoChatId, `📌 **TICKET ASSUMIDO POR ${resolverName}**\n\nEssa nota já entrou **COM BONO**. Se estiver tudo certo no sistema, basta clicar no botão abaixo para passar a bola para a Analista:`, {
-                  message_thread_id: parseInt(ticket.thread_id),
-                  parse_mode: 'Markdown',
-                  reply_markup: {
-                    inline_keyboard: [[{ text: `✅ Tudo Certo! (Passar p/ Analista)`, callback_data: `bono_sent_${ticketId}` }]]
-                  }
-                });
-                await bot.telegram.pinChatMessage(faturamentoChatId, msg.message_id).catch(()=>{});
+                promptMsg += `Esta nota já entrou **COM BONO**, mas você precisa digitar o número dele no chat para registrar.\n\n⏳ Digite o número do Bono abaixo (ou mande "100" se for o caso) para liberar o botão de passar para a Analista...`;
              } else {
-                await supabase.from('receiving_logs').update({ status: 'aguardando_bono' }).eq('id', ticketId);
-                const msg = await bot.telegram.sendMessage(faturamentoChatId, `📌 **TICKET ASSUMIDO POR ${resolverName}**\n\nEssa nota entrou **SEM BONO**.\n\n⏳ Digite o número do Bono que você gerou aqui no chat para liberar o botão de passar para a Analista...`, {
-                  message_thread_id: parseInt(ticket.thread_id),
-                  parse_mode: 'Markdown'
-                });
-                await bot.telegram.pinChatMessage(faturamentoChatId, msg.message_id).catch(()=>{});
+                promptMsg += `Esta nota entrou **SEM BONO**.\n\n⏳ Digite o número do Bono que você gerou aqui no chat para liberar o botão de passar para a Analista...`;
              }
+
+             const msg = await bot.telegram.sendMessage(faturamentoChatId, promptMsg, {
+               message_thread_id: parseInt(ticket.thread_id),
+               parse_mode: 'Markdown'
+             });
+             await bot.telegram.pinChatMessage(faturamentoChatId, msg.message_id).catch(()=>{});
            }
          } catch(e) {
            console.error('Erro ao pinar', e);
@@ -577,44 +560,9 @@ export function setupInvoiceAuditor(bot: Telegraf) {
     const conclusionStatus = statusMap[action as keyof typeof statusMap];
 
     if (action === 'ok') {
-      await supabase.from('receiving_logs').update({ 
-        status: 'resolvido', 
-        conclusion_status: conclusionStatus,
-        resolved_by: resolverName, 
-        resolved_at: new Date().toISOString() 
-      }).eq('id', ticketId);
-
+      await finishTicket(bot, parseInt(ticketId), resolverName, conclusionStatus, '');
       await ctx.editMessageText(`✅ **${conclusionStatus}**\n\nTicket finalizado por ${resolverName}.`, { parse_mode: 'Markdown' });
       ctx.answerCbQuery('Ticket concluído!');
-
-      // Fechar faturamento
-      if (ticket.thread_id) {
-         const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
-         if (fatGroups && fatGroups.length > 0) {
-            const op = (ticket.operation_type || 'COMPRA').toUpperCase();
-            const closedName = `✅ Ticket #${ticketId} - ${ticket.supplier} [${op}]`;
-            await bot.telegram.editForumTopic(fatGroups[0].chat_id, parseInt(ticket.thread_id), { name: closedName }).catch(()=>{});
-            await bot.telegram.closeForumTopic(fatGroups[0].chat_id, parseInt(ticket.thread_id)).catch(()=>{});
-         }
-      }
-      
-      // Fechar recebimento
-      if (ticket.chat_id && ticket.recebimento_thread_id) {
-         const msg = `✅ *TICKET CONCLUÍDO*\nFinalizado por *${resolverName}*\n\n📌 **Status:** ${conclusionStatus}\n\nA conversa foi encerrada.`;
-         
-         const { data: grp } = await supabase.from('groups_config').select('manager_username').eq('chat_id', ticket.chat_id).single();
-         let finalMsg = msg;
-         if (ticket.operation_type === 'transferencia' && ticket.type === 'divergencia' && grp?.manager_username) {
-            finalMsg = `${msg}\n\n🚨 **Ciente ${grp.manager_username}? Acompanhamento finalizado.**`;
-         }
-         await bot.telegram.sendMessage(ticket.chat_id, finalMsg, {
-            message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown'
-         }).catch(()=>{});
-         const op = (ticket.operation_type || 'COMPRA').toUpperCase();
-         const closedName = `✅ Ticket #${ticketId} - ${ticket.supplier} [${op}]`;
-         await bot.telegram.editForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id), { name: closedName }).catch(()=>{});
-         await bot.telegram.closeForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id)).catch(()=>{});
-      }
     } else {
       await supabase.from('receiving_logs').update({ 
         status: 'aguardando_justificativa', 
@@ -708,6 +656,56 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
   } catch (e) {
     console.error('Erro forwarding', e);
   }
+}
+
+async function finishTicket(bot: Telegraf, ticketId: number, resolverName: string, conclusionStatus: string, justificativa: string = '') {
+    const { data: ticket } = await supabase.from('receiving_logs').select('*').eq('id', ticketId).single();
+    if (!ticket) return;
+
+    await supabase.from('receiving_logs').update({ 
+       status: 'resolvido', 
+       conclusion_status: conclusionStatus,
+       conclusion_observation: justificativa,
+       resolved_by: resolverName, 
+       resolved_at: new Date().toISOString() 
+    }).eq('id', ticketId);
+
+    const op = (ticket.operation_type || 'COMPRA').toUpperCase();
+    const closedName = `🟧 [FECHADO] Ticket #${ticket.id} - ${ticket.supplier} [${op}]`;
+
+    const sealMsgFaturamento = `🛑 **TICKET ENCERRADO** 🛑\n\n✅ Apuração Finalizada por: *${resolverName}*\n📌 Status: *${conclusionStatus}*\n📝 Obs: ${justificativa || 'Nenhuma'}`;
+    const sealMsgRecebimento = `✅ **TICKET CONCLUÍDO** ✅\nFinalizado por *${resolverName}*\n\n📌 **Status:** ${conclusionStatus}\n📝 **Observação/Ressalva:** ${justificativa || 'Nenhuma'}\n\n🛑 *A conversa foi encerrada.*`;
+
+    // Fechar Faturamento
+    if (ticket.thread_id) {
+       const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
+       if (fatGroups && fatGroups.length > 0) {
+          const fatChatId = fatGroups[0].chat_id;
+          await bot.telegram.sendMessage(fatChatId, sealMsgFaturamento, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' });
+          await bot.telegram.editForumTopic(fatChatId, parseInt(ticket.thread_id), { name: closedName }).catch(()=>{});
+          await bot.telegram.closeForumTopic(fatChatId, parseInt(ticket.thread_id)).catch(()=>{});
+       }
+    }
+
+    // Fechar Recebimento
+    if (ticket.chat_id && ticket.recebimento_thread_id) {
+       const { data: grp } = await supabase.from('groups_config').select('manager_username').eq('chat_id', ticket.chat_id).single();
+       let finalMsg = sealMsgRecebimento;
+       if (ticket.operation_type === 'transferencia' && ticket.type === 'divergencia' && grp?.manager_username) {
+          finalMsg = `${sealMsgRecebimento}\n\n🚨 **Ciente ${grp.manager_username}? Acompanhamento finalizado.**`;
+       }
+       await bot.telegram.sendMessage(ticket.chat_id, finalMsg, { message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown' }).catch(()=>{});
+       await bot.telegram.editForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id), { name: closedName }).catch(()=>{});
+       await bot.telegram.closeForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id)).catch(()=>{});
+    }
+
+    // Arquivar no Grupo de Auditoria
+    const { data: auditGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'auditoria');
+    if (auditGroups && auditGroups.length > 0) {
+       const auditChatId = auditGroups[0].chat_id;
+       const dossie = `📂 **DOSSIÊ DE AUDITORIA - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}`;
+       await bot.telegram.sendMessage(auditChatId, dossie, { parse_mode: 'Markdown' }).catch(()=>{});
+    }
 }
 
 async function checkReadyForAnalysis(bot: Telegraf, ticketId: number) {
