@@ -697,6 +697,19 @@ async function finishTicket(bot: Telegraf, ticketId: number, resolverName: strin
        await bot.telegram.sendMessage(ticket.chat_id, finalMsg, { message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown' }).catch(()=>{});
        await bot.telegram.editForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id), { name: closedName }).catch(()=>{});
        await bot.telegram.closeForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id)).catch(()=>{});
+       
+       // NOVO: Link Seguro e Dossiê por DM para o Gerente da Loja
+       const privateChatId = ticket.chat_id.replace('-100', '');
+       const groupLink = `https://t.me/c/${privateChatId}/${ticket.recebimento_thread_id}`;
+       
+       if (grp && grp.manager_username) {
+          const usernameStr = grp.manager_username.replace('@', '');
+          const { data: managerUser } = await supabase.from('user_roles').select('telegram_id').ilike('username', usernameStr).single();
+          if (managerUser && managerUser.telegram_id) {
+             const dossiePrivado = `📂 **SEU DOSSIÊ PRIVADO - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}\n\n🔗 [CLIQUE AQUI PARA LER O HISTÓRICO DO TICKET](${groupLink})`;
+             await bot.telegram.sendMessage(managerUser.telegram_id, dossiePrivado, { parse_mode: 'Markdown' }).catch(err => console.log('Erro DM Gerente:', err.message));
+          }
+       }
     }
 
     // Arquivar no Grupo de Auditoria
