@@ -33,7 +33,9 @@ class QueryBuilder {
   }
 
   select(columns: string = '*') {
-    this.action = 'select';
+    if (this.action !== 'insert' && this.action !== 'update' && this.action !== 'upsert' && this.action !== 'delete') {
+       this.action = 'select';
+    }
     this.selects = columns;
     return this;
   }
