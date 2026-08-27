@@ -85,6 +85,15 @@ async function start() {
     { command: 'horario', description: 'Configurar horário do grupo (Admin)' }
   ]).catch(err => console.error('Erro ao configurar menu de comandos:', err));
 
+  // Remove qualquer Webhook antigo que tenha ficado preso no Telegram (ex: da época do Supabase)
+  // Isso é obrigatório para que o bot.launch() (que usa Long Polling) funcione sem dar erro 409 Conflict.
+  try {
+     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+     console.log('🧹 Webhook antigo limpo com sucesso.');
+  } catch (err) {
+     console.error('Aviso ao limpar webhook:', err);
+  }
+
   bot.launch({
     allowedUpdates: ['message', 'callback_query', 'my_chat_member', 'chat_member', 'chat_join_request', 'channel_post', 'edited_message']
   }).then(() => {
