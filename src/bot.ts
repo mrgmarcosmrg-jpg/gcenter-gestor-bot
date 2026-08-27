@@ -33,7 +33,8 @@ bot.command('limpar', async (ctx) => {
 
 // Prova de vida
 bot.start(async (ctx) => {
-  await ctx.reply('🤖 Olá, Marcos! Eu estou VIVO e operando 100%! O meu sistema interno de atualizações foi concluído. Pode contar comigo!');
+  const userName = ctx.from?.first_name || 'Membro da Equipe';
+  await ctx.reply(`🤖 Olá, ${userName}! Eu sou o GCenter Gestor Bot, estou VIVO e operando 100% no servidor interno.\n\nVocê já tem meu contato ativado no privado. Pode contar comigo!`);
 });
 
 // Middleware para logging simples de interações
