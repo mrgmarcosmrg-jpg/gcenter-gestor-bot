@@ -76,18 +76,31 @@ export function setupReportsManager(bot: Telegraf) {
       await registerPendingRole(bot, ctx, `diretor_${setor}`);
    });
 
-   // Cadastro de Analistas e Contador
-   bot.command(['sou_analista_contas_a_pagar', 'sou_analista_contas_a_receber', 'sou_contador'], async (ctx) => {
+   // Cadastro de Analistas, Contador e demais cargos especializados
+   bot.command([
+      'sou_analista_contas_a_pagar',
+      'sou_analista_contas_a_receber',
+      'sou_contador',
+      'sou_nutricionista_gcenter',
+      'sou_gerente_producao_15',
+      'sou_gerente_producao_19',
+      'sou_comprador_supervisor',
+   ], async (ctx) => {
       if (ctx.chat.type !== 'private') return ctx.reply('⚠️ Por favor, use este comando no meu privado!');
       const cmd = ctx.message.text.split(' ')[0].replace('/', '').replace('@GCenter_Supermercado_bot', '');
       const roleMap: Record<string, string> = {
-         'sou_analista_contas_a_pagar': 'analista_contas_a_pagar',
+         'sou_analista_contas_a_pagar':   'analista_contas_a_pagar',
          'sou_analista_contas_a_receber': 'analista_contas_a_receber',
-         'sou_contador': 'contador',
+         'sou_contador':                  'contador',
+         'sou_nutricionista_gcenter':     'nutricionista_gcenter',
+         'sou_gerente_producao_15':       'gerente_producao_loja_15',
+         'sou_gerente_producao_19':       'gerente_producao_loja_19',
+         'sou_comprador_supervisor':      'comprador_supervisor',
       };
       const role = roleMap[cmd];
       if (!role) return;
       await registerPendingRole(bot, ctx, role);
+
    });
 
    // Comando para Sair (Unsubscribe)
