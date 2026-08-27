@@ -30,20 +30,34 @@ function formatTicketLink(ticket: any): string {
 }
 
 export function setupReportsManager(bot: Telegraf) {
-   // Cadastro de Gerente e Subgerente
-   bot.command(['sou_gerente', 'sou_subgerente'], async (ctx) => {
+   // Cadastro de Gerente e Subgerente por loja específica
+   const lojas = ['05', '07', '21', '22', '23'];
+   const comandosGerenteLoja = lojas.map(l => `sou_gerente_loja_${l}`);
+   const comandosSubgerenteLoja = lojas.map(l => `sou_subgerente_loja_${l}`);
+
+   bot.command([...comandosGerenteLoja, ...comandosSubgerenteLoja, 'sou_gerente', 'sou_subgerente'], async (ctx) => {
       if (ctx.chat.type !== 'private') return ctx.reply('⚠️ Por favor, use este comando no meu privado!');
-      const isSub = ctx.message.text.startsWith('/sou_subgerente');
-      const roleName = isSub ? 'subgerente' : 'gerente';
-      
+      const cmd = ctx.message.text.split(' ')[0].replace('/', '').replace('@GCenter_Supermercado_bot', '');
+      const isSub = cmd.startsWith('sou_subgerente');
+      const roleBase = isSub ? 'subgerente' : 'gerente';
+
+      // Verifica se é um comando com loja embutida (ex: sou_gerente_loja_21)
+      const lojaMatch = cmd.match(/loja_(\d+)/);
+      if (lojaMatch) {
+         const lojaNum = lojaMatch[1];
+         const { data: group } = await supabase.from('groups_config').select('*').ilike('store_name', `%${lojaNum}%`).single();
+         const storeLabel = group ? group.store_name : `Loja ${lojaNum}`;
+         await registerPendingRole(bot, ctx, `${roleBase}_loja_${lojaNum}`, storeLabel);
+         return;
+      }
+
+      // Fallback: comando genérico com nome da loja por parâmetro
       const match = ctx.message.text.match(/^\/sou_(?:sub)?gerente\s+(.+)/i);
-      if (!match) return ctx.reply(`⚠️ Como usar: /sou_${roleName} Nome da Loja\nExemplo: /sou_${roleName} GCenter 15`);
-      
+      if (!match) return ctx.reply(`⚠️ Use um comando específico como /sou_gerente_loja_21\nOu: /sou_${roleBase} Nome da Loja`);
       const storeName = match[1].trim();
       const { data: group } = await supabase.from('groups_config').select('*').ilike('store_name', storeName).single();
       if (!group) return ctx.reply(`❌ Não encontrei nenhuma loja configurada com o nome "${storeName}".`);
-
-      await registerPendingRole(bot, ctx, roleName, group.store_name);
+      await registerPendingRole(bot, ctx, roleBase, group.store_name);
    });
 
    // Cadastro de Supervisor
@@ -52,18 +66,28 @@ export function setupReportsManager(bot: Telegraf) {
       await registerPendingRole(bot, ctx, 'supervisor');
    });
 
-   // Cadastro de Diretor
+   // Cadastro de Diretores
    bot.command(['sou_diretor', 'sou_diretor_operacional_751809', 'sou_diretor_administrativo', 'sou_diretor_financeiro', 'sou_diretor_comercial'], async (ctx) => {
       if (ctx.chat.type !== 'private') return;
       const match = ctx.message.text.match(/^\/sou_diretor[_\s]+(?:(operacional_751809)|(administrativo|financeiro|comercial))/i);
       if (!match) return ctx.reply('⚠️ Como usar: /sou_diretor [administrativo | financeiro | comercial]\n(Acesso operacional requer senha autorizada).');
-      
       let setor = (match[1] || match[2]).toLowerCase();
-      
-      // Mapear de volta para 'operacional' puro internamente para o banco de dados
       if (setor === 'operacional_751809') setor = 'operacional';
-      // O diretor operacional não precisa de aprovação se estiver configurando a si mesmo (mas vamos usar o fluxo normal para todos por segurança)
       await registerPendingRole(bot, ctx, `diretor_${setor}`);
+   });
+
+   // Cadastro de Analistas e Contador
+   bot.command(['sou_analista_contas_a_pagar', 'sou_analista_contas_a_receber', 'sou_contador'], async (ctx) => {
+      if (ctx.chat.type !== 'private') return ctx.reply('⚠️ Por favor, use este comando no meu privado!');
+      const cmd = ctx.message.text.split(' ')[0].replace('/', '').replace('@GCenter_Supermercado_bot', '');
+      const roleMap: Record<string, string> = {
+         'sou_analista_contas_a_pagar': 'analista_contas_a_pagar',
+         'sou_analista_contas_a_receber': 'analista_contas_a_receber',
+         'sou_contador': 'contador',
+      };
+      const role = roleMap[cmd];
+      if (!role) return;
+      await registerPendingRole(bot, ctx, role);
    });
 
    // Comando para Sair (Unsubscribe)
