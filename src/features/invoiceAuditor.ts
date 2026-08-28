@@ -516,7 +516,7 @@ export function setupInvoiceAuditor(bot: Telegraf) {
       ctx.answerCbQuery(`Bono marcado como enviado!`);
   
       if (ticket.chat_id && ticket.recebimento_thread_id) {
-          await bot.telegram.sendMessage(ticket.chat_id, `✅ A faturista *${faturistaName}* gerou o bono!`, { 
+          await bot.telegram.sendMessage(ticket.chat_id, `✅ A faturista *${faturistaName}* gerou o bono!\n\n⚠️ **ATENÇÃO RECEBEDOR:** A parte burocrática está pronta!\nPor favor, assim que a mercadoria estiver no depósito, grave um **VÍDEO BOLINHA** (de até 15 segundos) mostrando-a e envie aqui no chat. Isso é obrigatório para que a Analista possa finalizar o Bono!`, { 
              message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown' 
           }).catch(()=>{});
       }
