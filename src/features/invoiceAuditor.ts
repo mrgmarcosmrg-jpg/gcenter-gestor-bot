@@ -385,41 +385,65 @@ export function setupInvoiceAuditor(bot: Telegraf) {
   });
 
   bot.action(/^nota_ok_(\d+)$/, async (ctx) => {
-    const ticketId = ctx.match[1];
-    await supabase.from('receiving_logs').update({ type: 'sucesso', status: 'draft_fornecedor', operation_type: 'compra' }).eq('id', ticketId);
-    await ctx.editMessageText(`✅ Compra Externa Com Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
-    await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo o **NOME DO FORNECEDOR**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    try {
+      await ctx.answerCbQuery('Processando...').catch(()=>{});
+      const ticketId = ctx.match[1];
+      await supabase.from('receiving_logs').update({ type: 'sucesso', status: 'draft_fornecedor', operation_type: 'compra' }).eq('id', ticketId);
+      await ctx.editMessageText(`✅ Compra Externa Com Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
+      await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo o **NOME DO FORNECEDOR**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    } catch (e: any) {
+      console.error('ERRO nota_ok:', e);
+      await ctx.reply(`❌ Erro no botão: ${e.message}`, { message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    }
   });
 
   bot.action(/^nota_erro_(\d+)$/, async (ctx) => {
-    const ticketId = ctx.match[1];
-    await supabase.from('receiving_logs').update({ type: 'divergencia', status: 'draft_fornecedor', operation_type: 'compra' }).eq('id', ticketId);
-    await ctx.editMessageText(`🚨 Compra Externa Sem Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
-    await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo o **NOME DO FORNECEDOR**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    try {
+      await ctx.answerCbQuery('Processando...').catch(()=>{});
+      const ticketId = ctx.match[1];
+      await supabase.from('receiving_logs').update({ type: 'divergencia', status: 'draft_fornecedor', operation_type: 'compra' }).eq('id', ticketId);
+      await ctx.editMessageText(`🚨 Compra Externa Sem Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
+      await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo o **NOME DO FORNECEDOR**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    } catch (e: any) {
+      console.error('ERRO nota_erro:', e);
+      await ctx.reply(`❌ Erro no botão: ${e.message}`, { message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    }
   });
 
   bot.action(/^transf_ok_(\d+)$/, async (ctx) => {
-    const ticketId = ctx.match[1];
-    await supabase.from('receiving_logs').update({ type: 'sucesso', status: 'draft_fornecedor', operation_type: 'transferencia' }).eq('id', ticketId);
-    await ctx.editMessageText(`🔄 Transferência Interna Com Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
-    await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo a **LOJA DE ORIGEM**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    try {
+      await ctx.answerCbQuery('Processando...').catch(()=>{});
+      const ticketId = ctx.match[1];
+      await supabase.from('receiving_logs').update({ type: 'sucesso', status: 'draft_fornecedor', operation_type: 'transferencia' }).eq('id', ticketId);
+      await ctx.editMessageText(`🔄 Transferência Interna Com Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
+      await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo a **LOJA DE ORIGEM**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    } catch (e: any) {
+      console.error('ERRO transf_ok:', e);
+      await ctx.reply(`❌ Erro no botão: ${e.message}`, { message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    }
   });
 
   bot.action(/^transf_erro_(\d+)$/, async (ctx) => {
-    const ticketId = ctx.match[1];
-    await supabase.from('receiving_logs').update({ type: 'divergencia', status: 'draft_fornecedor', operation_type: 'transferencia' }).eq('id', ticketId);
-    await ctx.editMessageText(`🚨 Transferência Interna Sem Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
-    
-    // Notifica gerente!
-    const { data: ticket } = await supabase.from('receiving_logs').select('chat_id').eq('id', ticketId).single();
-    if (ticket && ticket.chat_id) {
-       const { data: group } = await supabase.from('groups_config').select('manager_username').eq('chat_id', ticket.chat_id).single();
-       if (group && group.manager_username) {
-          await ctx.telegram.sendMessage(ctx.chat!.id, `🚨 **ATENÇÃO ${group.manager_username}**: Esta é uma Transferência Sem Bono e requer seu acompanhamento!`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
-       }
+    try {
+      await ctx.answerCbQuery('Processando...').catch(()=>{});
+      const ticketId = ctx.match[1];
+      await supabase.from('receiving_logs').update({ type: 'divergencia', status: 'draft_fornecedor', operation_type: 'transferencia' }).eq('id', ticketId);
+      await ctx.editMessageText(`🚨 Transferência Interna Sem Bono (Iniciando apuração...)`, { parse_mode: 'Markdown' });
+      
+      // Notifica gerente!
+      const { data: ticket } = await supabase.from('receiving_logs').select('chat_id').eq('id', ticketId).single();
+      if (ticket && ticket.chat_id) {
+         const { data: group } = await supabase.from('groups_config').select('manager_username').eq('chat_id', ticket.chat_id).single();
+         if (group && group.manager_username) {
+            await ctx.telegram.sendMessage(ctx.chat!.id, `🚨 **ATENÇÃO ${group.manager_username}**: Esta é uma Transferência Sem Bono e requer seu acompanhamento!`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+         }
+      }
+      
+      await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo a **LOJA DE ORIGEM**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
+    } catch (e: any) {
+      console.error('ERRO transf_erro:', e);
+      await ctx.reply(`❌ Erro no botão: ${e.message}`, { message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
     }
-    
-    await ctx.telegram.sendMessage(ctx.chat!.id, `📝 Passo 1: Digite abaixo a **LOJA DE ORIGEM**:`, { parse_mode: 'Markdown', message_thread_id: (ctx.callbackQuery.message as any)?.message_thread_id });
   });
 
   // ==========================================
