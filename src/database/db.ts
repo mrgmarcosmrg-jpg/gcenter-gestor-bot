@@ -189,11 +189,8 @@ class QueryBuilder {
 
     try {
         const result = await this.pool.query(sql, this.params);
-        if (this.action === 'select') {
-            if (this.isSingle) {
-                return { data: result.rows.length > 0 ? result.rows[0] : null, error: null };
-            }
-            return { data: result.rows, error: null };
+        if (this.isSingle) {
+            return { data: result.rows.length > 0 ? result.rows[0] : null, error: null };
         }
         return { data: result.rows, error: null };
     } catch (e) {
