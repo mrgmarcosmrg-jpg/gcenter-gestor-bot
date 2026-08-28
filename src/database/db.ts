@@ -283,6 +283,41 @@ export async function setupDatabase() {
     `);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS returns_logs (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        chat_id VARCHAR(255),
+        thread_id VARCHAR(255),
+        store_name VARCHAR(255),
+        requester_name VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'aguardando_loja',
+        
+        purchase_date VARCHAR(50),
+        total_receipt_value NUMERIC(10,2),
+        return_value NUMERIC(10,2),
+        returned_products TEXT,
+        
+        receipt_photo_id TEXT,
+        return_note_photo_id TEXT,
+        video_note_id TEXT,
+        
+        manager_notified BOOLEAN DEFAULT FALSE,
+        resolved_by VARCHAR(255),
+        resolved_at TIMESTAMP WITH TIME ZONE
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS returns_messages (
+        id SERIAL PRIMARY KEY,
+        return_id INTEGER REFERENCES returns_logs(id) ON DELETE CASCADE,
+        chat_id VARCHAR(255) NOT NULL,
+        message_id INTEGER NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS goals (
         id SERIAL PRIMARY KEY,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

@@ -12,6 +12,7 @@ import { setupInvoiceAuditor } from './features/invoiceAuditor';
 import { setupReportsManager } from './features/reportsManager';
 import { setupCultureManager } from './features/cultureManager';
 import { setupGatekeeper } from './features/gatekeeper';
+import { setupReturnsManager } from './features/returnsManager';
 
 dotenv.config();
 
@@ -68,6 +69,7 @@ setupInvoiceAuditor(bot);
 setupReportsManager(bot);
 setupCultureManager(bot);
 setupGatekeeper(bot);
+setupReturnsManager(bot);
 
 // Inicia o bot
 async function start() {
