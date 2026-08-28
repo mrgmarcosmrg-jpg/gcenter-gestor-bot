@@ -48,7 +48,7 @@ export function setupInvoiceAuditor(bot: Telegraf) {
       return ctx.reply('✅ Este grupo foi configurado como a CENTRAL DE FATURAMENTO.');
     }
 
-    if (lowerText.includes('/setorauditoria')) {
+    if (lowerText.includes('/setorauditoria') && !lowerText.includes('/setorauditoriadevolucoes')) {
       if (ctx.chat.type === 'private') return;
       try {
         const admins = await ctx.getChatAdministrators();
