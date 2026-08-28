@@ -638,14 +638,33 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
     if (!ticket) return;
 
     const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
-    if (!fatGroups || fatGroups.length === 0) return;
+    if (!fatGroups || fatGroups.length === 0) {
+      if (ticket.chat_id) {
+         await bot.telegram.sendMessage(ticket.chat_id, `❌ ERRO: Não encontrei nenhum grupo configurado como Faturamento! Alguém precisa dar o comando /setorfaturamento lá no grupo do Faturamento.`, {
+            message_thread_id: ticket.recebimento_thread_id ? parseInt(ticket.recebimento_thread_id) : undefined
+         });
+      }
+      return;
+    }
     const faturamentoChatId = fatGroups[0].chat_id;
 
     const op = (ticket.operation_type || 'COMPRA').toUpperCase();
     const isSemBono = ticket.type === 'divergencia';
 
     const topicName = `🔵 Ticket #${ticketId} - ${ticket.supplier} [${op}]`;
-    const topic = await bot.telegram.createForumTopic(faturamentoChatId, topicName).catch(()=>null);
+    
+    let topic;
+    try {
+      topic = await bot.telegram.createForumTopic(faturamentoChatId, topicName);
+    } catch (createErr: any) {
+      console.error('ERRO AO CRIAR TOPICO NO FATURAMENTO:', createErr);
+      if (ticket.chat_id) {
+         await bot.telegram.sendMessage(ticket.chat_id, `❌ Falha ao repassar o ticket pro Faturamento! Erro: ${createErr.message}`, {
+            message_thread_id: ticket.recebimento_thread_id ? parseInt(ticket.recebimento_thread_id) : undefined
+         });
+      }
+      return;
+    }
     if (!topic) return;
     
     const threadId = topic.message_thread_id;
