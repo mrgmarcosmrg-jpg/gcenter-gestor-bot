@@ -54,6 +54,19 @@ export function setupReturnsManager(bot: Telegraf) {
       return ctx.reply('📂 Este grupo foi configurado como o ARQUIVO DE AUDITORIA DE DEVOLUÇÕES.');
     }
 
+    if (lowerText.includes('/paineldevolucoes')) {
+      if (ctx.chat.type === 'private') return;
+      const admins = await ctx.getChatAdministrators().catch(() => []);
+      if (!admins.some(a => a.user.id === ctx.from.id)) return;
+
+      const caixa = `🛒 **CENTRAL DE DEVOLUÇÕES E CANCELAMENTOS** 🛒\n\n👇 **COMO INICIAR UMA DEVOLUÇÃO:**\nEnvie aqui embaixo a **FOTO DO CUPOM** ou da **TELA** do cliente.\n\nO robô vai mover sua foto automaticamente para uma conversa particular (Tópico) e lá dentro vai te pedir o passo a passo (Data, Valor, Foto do Contra-vale, Vídeo do produto, etc).\n\n*Atenção: Não mande nada fora dos tópicos a não ser a foto inicial do cupom!*`;
+      
+      const sentMsg = await ctx.reply(caixa, { parse_mode: 'Markdown' });
+      await ctx.pinChatMessage(sentMsg.message_id).catch(()=>{});
+      await ctx.deleteMessage(ctx.message.message_id).catch(()=>{});
+      return;
+    }
+
     // ==========================================
     // CAPTURA DE TEXTOS DURANTE O PREENCHIMENTO
     // ==========================================
