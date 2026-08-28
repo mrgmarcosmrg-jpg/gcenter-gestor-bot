@@ -249,26 +249,36 @@ export async function setupDatabase() {
       CREATE TABLE IF NOT EXISTS receiving_logs (
         id SERIAL PRIMARY KEY,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        chat_id VARCHAR(255),
-        recebimento_thread_id VARCHAR(255),
-        thread_id VARCHAR(255),
         store_name VARCHAR(255),
         requester_name VARCHAR(255),
-        original_message_id TEXT,
-        status VARCHAR(100),
-        type VARCHAR(100),
-        operation_type VARCHAR(100),
         supplier VARCHAR(255),
-        invoice_value NUMERIC(15,2),
+        invoice_value NUMERIC(10,2),
+        operation_type VARCHAR(50),
+        status VARCHAR(50) DEFAULT 'pendente',
+        chat_id VARCHAR(255),
+        media_group_id VARCHAR(255),
+        original_message_id TEXT,
+        thread_id VARCHAR(255),
+        recebimento_thread_id VARCHAR(255),
+        type VARCHAR(50),
         problem_description TEXT,
-        physical_receipt_at TIMESTAMP WITH TIME ZONE,
         assumed_by VARCHAR(255),
         bono_sent BOOLEAN DEFAULT FALSE,
-        resolved_by VARCHAR(255),
-        conclusion_status VARCHAR(255),
+        physical_receipt_at TIMESTAMP WITH TIME ZONE,
+        conclusion_status VARCHAR(100),
         conclusion_observation TEXT,
-        resolved_at TIMESTAMP WITH TIME ZONE,
-        analyst_notified BOOLEAN DEFAULT FALSE
+        resolved_by VARCHAR(255),
+        resolved_at TIMESTAMP WITH TIME ZONE
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ticket_messages (
+        id SERIAL PRIMARY KEY,
+        ticket_id INTEGER REFERENCES receiving_logs(id) ON DELETE CASCADE,
+        chat_id VARCHAR(255) NOT NULL,
+        message_id INTEGER NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
 

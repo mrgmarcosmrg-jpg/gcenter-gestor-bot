@@ -4,6 +4,33 @@ import { supabase } from '../database/db';
 
 export function setupInvoiceAuditor(bot: Telegraf) {
 
+  // ==========================================
+  // RASTREADOR DE MENSAGENS PARA ARQUIVO MORTO
+  // ==========================================
+  bot.on('message', async (ctx, next) => {
+    if (ctx.message && ctx.chat && ctx.message.message_thread_id) {
+       const threadStr = ctx.message.message_thread_id.toString();
+       
+       let ticketId = null;
+       const { data: ticketRec } = await supabase.from('receiving_logs').select('id').eq('recebimento_thread_id', threadStr).single();
+       if (ticketRec) {
+          ticketId = ticketRec.id;
+       } else {
+          const { data: ticketFat } = await supabase.from('receiving_logs').select('id').eq('thread_id', threadStr).single();
+          if (ticketFat) ticketId = ticketFat.id;
+       }
+
+       if (ticketId) {
+          await supabase.from('ticket_messages').insert({
+             ticket_id: ticketId,
+             chat_id: ctx.chat.id.toString(),
+             message_id: ctx.message.message_id
+          });
+       }
+    }
+    return next();
+  });
+
   bot.on('text', async (ctx, next) => {
     const text = ctx.message.text;
     if (!text) return next();
@@ -719,48 +746,51 @@ async function finishTicket(bot: Telegraf, ticketId: number, resolverName: strin
     const sealMsgFaturamento = `🛑 **TICKET ENCERRADO** 🛑\n\n✅ Apuração Finalizada por: *${resolverName}*\n📌 Status: *${conclusionStatus}*\n📝 Obs: ${justificativa || 'Nenhuma'}`;
     const sealMsgRecebimento = `✅ **TICKET CONCLUÍDO** ✅\nFinalizado por *${resolverName}*\n\n📌 **Status:** ${conclusionStatus}\n📝 **Observação/Ressalva:** ${justificativa || 'Nenhuma'}\n\n🛑 *A conversa foi encerrada.*`;
 
-    // Fechar Faturamento
-    if (ticket.thread_id) {
-       const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
-       if (fatGroups && fatGroups.length > 0) {
-          const fatChatId = fatGroups[0].chat_id;
-          await bot.telegram.sendMessage(fatChatId, sealMsgFaturamento, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' });
-          await bot.telegram.editForumTopic(fatChatId, parseInt(ticket.thread_id), { name: closedName }).catch(()=>{});
-          await bot.telegram.closeForumTopic(fatChatId, parseInt(ticket.thread_id)).catch(()=>{});
+    // 1. Arquivar no Grupo de Auditoria (Cópia Reversa)
+    const { data: auditGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'auditoria');
+    if (auditGroups && auditGroups.length > 0) {
+       const auditChatId = auditGroups[0].chat_id;
+       const auditTopic = await bot.telegram.createForumTopic(auditChatId, closedName).catch(()=>null);
+       
+       if (auditTopic) {
+          const auditThreadId = auditTopic.message_thread_id;
+          
+          // Buscar todo o histórico de mensagens rastreadas
+          const { data: history } = await supabase.from('ticket_messages').select('*').eq('ticket_id', ticketId).order('id', { ascending: true });
+          if (history && history.length > 0) {
+             for (const msg of history) {
+                await bot.telegram.copyMessage(auditChatId, msg.chat_id, msg.message_id, { message_thread_id: auditThreadId }).catch(()=>{});
+             }
+          }
+
+          const dossie = `📂 **DOSSIÊ DE AUDITORIA - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}`;
+          await bot.telegram.sendMessage(auditChatId, dossie, { message_thread_id: auditThreadId, parse_mode: 'Markdown' }).catch(()=>{});
+          await bot.telegram.closeForumTopic(auditChatId, auditThreadId).catch(()=>{});
        }
     }
 
-    // Fechar Recebimento
-    if (ticket.chat_id && ticket.recebimento_thread_id) {
+    // 2. Enviar DM para o Gerente da Loja (Sem link, pois será apagado)
+    if (ticket.chat_id) {
        const { data: grp } = await supabase.from('groups_config').select('manager_username').eq('chat_id', ticket.chat_id).single();
-       let finalMsg = sealMsgRecebimento;
-       if (ticket.operation_type === 'transferencia' && ticket.type === 'divergencia' && grp?.manager_username) {
-          finalMsg = `${sealMsgRecebimento}\n\n🚨 **Ciente ${grp.manager_username}? Acompanhamento finalizado.**`;
-       }
-       await bot.telegram.sendMessage(ticket.chat_id, finalMsg, { message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown' }).catch(()=>{});
-       await bot.telegram.editForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id), { name: closedName }).catch(()=>{});
-       await bot.telegram.closeForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id)).catch(()=>{});
-       
-       // NOVO: Link Seguro e Dossiê por DM para o Gerente da Loja
-       const privateChatId = ticket.chat_id.replace('-100', '');
-       const groupLink = `https://t.me/c/${privateChatId}/${ticket.recebimento_thread_id}`;
-       
        if (grp && grp.manager_username) {
           const usernameStr = grp.manager_username.replace('@', '');
           const { data: managerUser } = await supabase.from('user_roles').select('telegram_id').ilike('username', usernameStr).single();
           if (managerUser && managerUser.telegram_id) {
-             const dossiePrivado = `📂 **SEU DOSSIÊ PRIVADO - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}\n\n🔗 [CLIQUE AQUI PARA LER O HISTÓRICO DO TICKET](${groupLink})`;
+             const dossiePrivado = `📂 **SEU DOSSIÊ PRIVADO - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}\n\n*(O histórico completo foi arquivado na Auditoria Central).*`;
              await bot.telegram.sendMessage(managerUser.telegram_id, dossiePrivado, { parse_mode: 'Markdown' }).catch(err => console.log('Erro DM Gerente:', err.message));
           }
        }
     }
 
-    // Arquivar no Grupo de Auditoria
-    const { data: auditGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'auditoria');
-    if (auditGroups && auditGroups.length > 0) {
-       const auditChatId = auditGroups[0].chat_id;
-       const dossie = `📂 **DOSSIÊ DE AUDITORIA - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}`;
-       await bot.telegram.sendMessage(auditChatId, dossie, { parse_mode: 'Markdown' }).catch(()=>{});
+    // 3. Deletar Tópicos Originais (Sumiço completo)
+    if (ticket.thread_id) {
+       const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
+       if (fatGroups && fatGroups.length > 0) {
+          await bot.telegram.deleteForumTopic(fatGroups[0].chat_id, parseInt(ticket.thread_id)).catch(()=>{});
+       }
+    }
+    if (ticket.chat_id && ticket.recebimento_thread_id) {
+       await bot.telegram.deleteForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id)).catch(()=>{});
     }
 }
 
