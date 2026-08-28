@@ -37,15 +37,24 @@ bot.start(async (ctx) => {
   await ctx.reply(`🤖 Olá, ${userName}! Eu sou o GCenter Gestor Bot, estou VIVO e operando 100% no servidor interno.\n\nVocê já tem meu contato ativado no privado. Pode contar comigo!`);
 });
 
+// Global error handler to prevent crashes
+bot.catch((err, ctx) => {
+  console.error(`❌ ERRO GLOBAL [${ctx.updateType}]:`, err);
+});
+
 // Middleware para logging simples de interações
 bot.use(async (ctx, next) => {
   const start = new Date();
-  console.log(`\n--- NOVO UPDATE RECEBIDO: ${ctx.updateType} ---`);
-  console.log(JSON.stringify(ctx.update, null, 2));
+  // console.log(`\n--- NOVO UPDATE RECEBIDO: ${ctx.updateType} ---`);
   
-  await next();
+  try {
+    await next();
+  } catch (err) {
+    console.error('Erro no fluxo principal (capturado pelo middleware):', err);
+  }
+  
   const ms = new Date().getTime() - start.getTime();
-  console.log(`[${new Date().toISOString()}] Update ${ctx.updateType} processado em ${ms}ms`);
+  // console.log(`[${new Date().toISOString()}] Update ${ctx.updateType} processado em ${ms}ms`);
 });
 
 // Inicialização das funcionalidades
