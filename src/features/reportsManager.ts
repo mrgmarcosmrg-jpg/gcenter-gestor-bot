@@ -362,22 +362,53 @@ async function runNetworkEveningReport(bot: Telegraf, user: any, targetDate?: Da
    let msg = '';
    
    if (user.role === 'supervisor' || user.role === 'diretor_operacional' || user.role === 'analista_de_faturamento') {
+      const resolved = todayLogs.filter(l => l.status === 'resolvido');
+      const withoutRessalva = resolved.filter(l => l.conclusion_status === 'Aceite Total (Tudo conforme)');
+      const withRessalva = resolved.filter(l => l.conclusion_status && l.conclusion_status !== 'Aceite Total (Tudo conforme)');
+      
+      const semBono = todayLogs.filter(l => l.type === 'divergencia');
+      
+      let avgTime = 0, fastest = 0, slowest = 0;
+      if (resolved.length > 0) {
+          const durations = resolved.map(l => {
+             const start = new Date(l.created_at).getTime();
+             const end = new Date(l.resolved_at || l.created_at).getTime();
+             return Math.max(0, end - start);
+          }).filter(d => d > 0);
+          
+          if (durations.length > 0) {
+             fastest = Math.min(...durations);
+             slowest = Math.max(...durations);
+             avgTime = durations.reduce((a,b)=>a+b, 0) / durations.length;
+          }
+      }
+
       msg += `📊 *Boletim Operacional Consolidado (${dateStr})*\n\n`;
-      msg += `A rede toda gerou **${todayLogs.length} operações**.\n`;
-      msg += `Tivemos **${transfers.length} Transferências**, com eficiência geral de **${efficiency}%**.\n\n`;
+      msg += `📦 **Total de Operações Geradas:** ${todayLogs.length}\n`;
+      msg += `✅ **Total de Tickets Concluídos:** ${resolved.length}\n`;
+      msg += `  └ Sem Ressalvas (Limpos): ${withoutRessalva.length}\n`;
+      msg += `  └ Com Ressalvas (Problemas): ${withRessalva.length}\n`;
+      msg += `⚠️ **Entregas s/ Bono Prévio:** ${semBono.length} (Tiveram que fazer na hora)\n\n`;
+      
+      if (resolved.length > 0) {
+         msg += `⏱️ **Performance de Resolução**\n`;
+         msg += `  └ Tempo Médio: ${formatDuration(avgTime)}\n`;
+         msg += `  └ Mais Rápida: ${formatDuration(fastest)}\n`;
+         msg += `  └ Mais Demorada: ${formatDuration(slowest)}\n\n`;
+      }
       
       // Ranking de erros (mais errou)
       const storeErrors: Record<string, number> = {};
-      errors.forEach(e => { storeErrors[e.store_name] = (storeErrors[e.store_name] || 0) + 1; });
+      semBono.forEach(e => { storeErrors[e.store_name] = (storeErrors[e.store_name] || 0) + 1; });
       const sortedStores = Object.entries(storeErrors).sort((a,b)=>b[1]-a[1]);
       
       if (sortedStores.length > 0) {
-         msg += `🏆 *Lojas com mais ressalvas (Foco para Treinamento):*\n`;
+         msg += `🏆 *Lojas que mais atrasaram Bonos (Top 3):*\n`;
          sortedStores.slice(0, 3).forEach(([store, count], i) => {
-            msg += `🚨 ${i+1}º - ${store} (${count} erros)\n`;
+            msg += `🚨 ${i+1}º - ${store} (${count} notas atrasadas)\n`;
          });
       } else {
-         msg += `🌟 *Rede Impecável!* Nenhuma ressalva registrada ${dateStr.toLowerCase()}.\n`;
+         msg += `🌟 *Rede Impecável!* Nenhuma entrega sem bono ${dateStr.toLowerCase()}.\n`;
       }
       
       // Ranking de lentidão (Lojas com pendências abertas há mais tempo)
