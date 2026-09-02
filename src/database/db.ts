@@ -240,10 +240,20 @@ export async function setupDatabase() {
         telegram_id VARCHAR(255) UNIQUE NOT NULL,
         username VARCHAR(255),
         first_name VARCHAR(255),
+        name VARCHAR(255),
+        store_name VARCHAR(255),
         role VARCHAR(100),
         status VARCHAR(50) DEFAULT 'pending'
       );
     `);
+    
+    // Auto-patching para adicionar colunas em tabelas existentes caso o banco já tenha sido criado
+    try {
+        await client.query(`ALTER TABLE user_roles ADD COLUMN name VARCHAR(255);`);
+    } catch (e) {}
+    try {
+        await client.query(`ALTER TABLE user_roles ADD COLUMN store_name VARCHAR(255);`);
+    } catch (e) {}
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS receiving_logs (
