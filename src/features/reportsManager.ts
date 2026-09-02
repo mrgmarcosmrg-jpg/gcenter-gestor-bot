@@ -67,12 +67,11 @@ export function setupReportsManager(bot: Telegraf) {
    });
 
    // Cadastro de Diretores
-   bot.command(['sou_diretor', 'sou_diretor_operacional_751809', 'sou_diretor_administrativo', 'sou_diretor_financeiro', 'sou_diretor_comercial'], async (ctx) => {
+   bot.command(['sou_diretor', 'sou_diretor_operacional', 'sou_diretor_administrativo', 'sou_diretor_financeiro', 'sou_diretor_comercial'], async (ctx) => {
       if (ctx.chat.type !== 'private') return;
-      const match = ctx.message.text.match(/^\/sou_diretor[_\s]+(?:(operacional_751809)|(administrativo|financeiro|comercial))/i);
-      if (!match) return ctx.reply('⚠️ Como usar: /sou_diretor [administrativo | financeiro | comercial]\n(Acesso operacional requer senha autorizada).');
-      let setor = (match[1] || match[2]).toLowerCase();
-      if (setor === 'operacional_751809') setor = 'operacional';
+      const match = ctx.message.text.match(/^\/sou_diretor[_\s]+(operacional|administrativo|financeiro|comercial)/i);
+      if (!match) return ctx.reply('⚠️ Como usar: /sou_diretor [operacional | administrativo | financeiro | comercial]');
+      const setor = match[1].toLowerCase();
       await registerPendingRole(bot, ctx, `diretor_${setor}`);
    });
 
