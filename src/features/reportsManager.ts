@@ -80,6 +80,7 @@ export function setupReportsManager(bot: Telegraf) {
    bot.command([
       'sou_analista_contas_a_pagar',
       'sou_analista_contas_a_receber',
+      'sou_analista_de_faturamento',
       'sou_contador',
       'sou_nutricionista_gcenter',
       'sou_gerente_producao_15',
@@ -91,6 +92,7 @@ export function setupReportsManager(bot: Telegraf) {
       const roleMap: Record<string, string> = {
          'sou_analista_contas_a_pagar':   'analista_contas_a_pagar',
          'sou_analista_contas_a_receber': 'analista_contas_a_receber',
+         'sou_analista_de_faturamento':   'analista_de_faturamento',
          'sou_contador':                  'contador',
          'sou_nutricionista_gcenter':     'nutricionista_gcenter',
          'sou_gerente_producao_15':       'gerente_producao_loja_15',
@@ -149,17 +151,33 @@ export function setupReportsManager(bot: Telegraf) {
       await ctx.reply('✅ Disparos concluídos!');
    });
 
+   // Comando para testar o relatório de ontem manualmente
+   bot.command('fechamento_ontem', async (ctx) => {
+      if (ctx.chat.type !== 'private') return;
+      const { data: user } = await supabase.from('user_roles').select('*').eq('telegram_id', ctx.chat.id.toString()).single();
+      if (!user) return ctx.reply('⚠️ Você não tem nenhum cargo registrado.');
+      if (user.status !== 'approved') return ctx.reply('⏳ Seu cadastro ainda está aguardando aprovação.');
+      
+      await ctx.reply('⏳ Gerando boletim de Oculto (Ontem)...');
+      
+      const ontem = new Date();
+      ontem.setDate(ontem.getDate() - 1);
+      await runNetworkEveningReport(bot, user, ontem);
+      await ctx.reply('✅ Boletim de ontem concluído!');
+   });
+
    // CRON JOBS (Filtrando apenas approved)
    cron.schedule('0 8 * * 1-6', async () => {
       const { data: users } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['gerente', 'subgerente']);
       if (users) for (const user of users) await runMorningReport(bot, user);
    }, { timezone: "America/Sao_Paulo" });
 
-   cron.schedule('0 18 * * 1-5', async () => {
+   // Relatório às 22h diário
+   cron.schedule('0 22 * * *', async () => {
       const { data: usersStore } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['gerente', 'subgerente']);
       if (usersStore) for (const user of usersStore) await runEveningReport(bot, user);
       
-      const { data: usersNetwork } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['supervisor', 'diretor_operacional', 'diretor_administrativo', 'diretor_financeiro', 'diretor_comercial']);
+      const { data: usersNetwork } = await supabase.from('user_roles').select('*').eq('status', 'approved').in('role', ['supervisor', 'diretor_operacional', 'diretor_administrativo', 'diretor_financeiro', 'diretor_comercial', 'analista_de_faturamento']);
       if (usersNetwork) for (const user of usersNetwork) await runNetworkEveningReport(bot, user);
    }, { timezone: "America/Sao_Paulo" });
 
@@ -321,12 +339,15 @@ async function runWeeklyReport(bot: Telegraf, user: any) {
 // ----------------------------------------------------
 // RELATÓRIOS CONSOLIDADOS (Supervisor / Diretores)
 // ----------------------------------------------------
-async function runNetworkEveningReport(bot: Telegraf, user: any) {
-   const today = new Date();
+async function runNetworkEveningReport(bot: Telegraf, user: any, targetDate?: Date) {
+   const baseDate = targetDate || new Date();
+   const today = new Date(baseDate);
    today.setHours(0,0,0,0);
    const tomorrow = new Date(today);
    tomorrow.setDate(tomorrow.getDate() + 1);
    
+   const dateStr = targetDate ? today.toLocaleDateString('pt-BR') : 'Hoje';
+
    const { data: todayLogs } = await supabase.from('receiving_logs')
       .select('*')
       .gte('created_at', today.toISOString())
@@ -341,8 +362,8 @@ async function runNetworkEveningReport(bot: Telegraf, user: any) {
 
    let msg = '';
    
-   if (user.role === 'supervisor' || user.role === 'diretor_operacional') {
-      msg += `📊 *Boletim Operacional Consolidado (Hoje)*\n\n`;
+   if (user.role === 'supervisor' || user.role === 'diretor_operacional' || user.role === 'analista_de_faturamento') {
+      msg += `📊 *Boletim Operacional Consolidado (${dateStr})*\n\n`;
       msg += `A rede toda gerou **${todayLogs.length} operações**.\n`;
       msg += `Tivemos **${transfers.length} Transferências**, com eficiência geral de **${efficiency}%**.\n\n`;
       
@@ -357,7 +378,7 @@ async function runNetworkEveningReport(bot: Telegraf, user: any) {
             msg += `🚨 ${i+1}º - ${store} (${count} erros)\n`;
          });
       } else {
-         msg += `🌟 *Rede Impecável!* Nenhuma ressalva registrada hoje.\n`;
+         msg += `🌟 *Rede Impecável!* Nenhuma ressalva registrada ${dateStr.toLowerCase()}.\n`;
       }
       
       // Ranking de lentidão (Lojas com pendências abertas há mais tempo)
@@ -376,7 +397,7 @@ async function runNetworkEveningReport(bot: Telegraf, user: any) {
       pendings.forEach(p => { if(p.invoice_value) totalValuePending += p.invoice_value; });
       
       msg += `💰 *Boletim Financeiro (Pendências)*\n\n`;
-      msg += `Hoje tivemos **${todayLogs.length} operações** na rede.\n`;
+      msg += `No dia (${dateStr}) tivemos **${todayLogs.length} operações** na rede.\n`;
       msg += `Atualmente temos **${pendings.length} tickets parados** aguardando alguma ação.\n`;
       msg += `Valor total estimado retido: **R$ ${totalValuePending.toFixed(2)}**.\n`;
    }
@@ -385,8 +406,8 @@ async function runNetworkEveningReport(bot: Telegraf, user: any) {
       const errPurchases = purchases.filter(l => l.type === 'divergencia');
       const purchEff = getEfficiency(purchases.length, errPurchases.length);
       
-      msg += `🤝 *Boletim Comercial (Fornecedores)*\n\n`;
-      msg += `Hoje recebemos **${purchases.length} notas de compras externas**.\n`;
+      msg += `🤝 *Boletim Comercial (Fornecedores) - ${dateStr}*\n\n`;
+      msg += `Recebemos **${purchases.length} notas de compras externas**.\n`;
       msg += `Eficiência de Entrega (Sem divergência): **${purchEff}%**\n`;
    }
    else if (user.role === 'diretor_administrativo') {
