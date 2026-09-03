@@ -339,18 +339,24 @@ async function runWeeklyReport(bot: Telegraf, user: any) {
 // RELATÓRIOS CONSOLIDADOS (Supervisor / Diretores)
 // ----------------------------------------------------
 async function runNetworkEveningReport(bot: Telegraf, user: any, targetDate?: Date) {
+   // Ajuste robusto de Fuso Horário (Garante que a data seja de São Paulo, independente de onde o Docker esteja rodando)
    const baseDate = targetDate || new Date();
-   const today = new Date(baseDate);
-   today.setHours(0,0,0,0);
-   const tomorrow = new Date(today);
-   tomorrow.setDate(tomorrow.getDate() + 1);
    
-   const dateStr = targetDate ? today.toLocaleDateString('pt-BR') : 'Hoje';
+   // Formatar como YYYY-MM-DD na timezone do Brasil
+   const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
+   const spDateString = formatter.format(baseDate); // Ex: "2026-09-02"
+   
+   // Montar os limites de início (00:00:00 BRT = 03:00:00 UTC) e fim do dia
+   // O formato ISO 8601 permite especificar o fuso (-03:00).
+   const startOfDayBRT = `${spDateString}T00:00:00.000-03:00`;
+   const endOfDayBRT = `${spDateString}T23:59:59.999-03:00`;
+   
+   const dateStr = targetDate ? spDateString.split('-').reverse().join('/') : 'Hoje';
 
    const { data: todayLogs } = await supabase.from('receiving_logs')
       .select('*')
-      .gte('created_at', today.toISOString())
-      .lt('created_at', tomorrow.toISOString());
+      .gte('created_at', startOfDayBRT)
+      .lte('created_at', endOfDayBRT);
       
    if (!todayLogs) return;
 
