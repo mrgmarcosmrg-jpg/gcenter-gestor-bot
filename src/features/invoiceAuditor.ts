@@ -763,7 +763,7 @@ async function finishTicket(bot: Telegraf, ticketId: number, resolverName: strin
              }
           }
 
-          const dossie = `📂 **DOSSIÊ DE AUDITORIA - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}`;
+          const dossie = `📂 **DOSSIÊ DE AUDITORIA - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
           await bot.telegram.sendMessage(auditChatId, dossie, { message_thread_id: auditThreadId, parse_mode: 'Markdown' }).catch(()=>{});
           await bot.telegram.closeForumTopic(auditChatId, auditThreadId).catch(()=>{});
        }
@@ -776,7 +776,7 @@ async function finishTicket(bot: Telegraf, ticketId: number, resolverName: strin
           const usernameStr = grp.manager_username.replace('@', '');
           const { data: managerUser } = await supabase.from('user_roles').select('telegram_id').ilike('username', usernameStr).single();
           if (managerUser && managerUser.telegram_id) {
-             const dossiePrivado = `📂 **SEU DOSSIÊ PRIVADO - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR')}\n\n*(O histórico completo foi arquivado na Auditoria Central).*`;
+             const dossiePrivado = `📂 **SEU DOSSIÊ PRIVADO - TICKET #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n🏷 **Fornecedor:** ${ticket.supplier}\n💰 **Valor:** R$ ${ticket.invoice_value}\n🧾 **Operação:** ${op}\n\n✅ **Fechado por:** ${resolverName}\n📌 **Veredito:** ${conclusionStatus}\n📝 **Observação:** ${justificativa || 'Nenhuma'}\n📅 **Data:** ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}\n\n*(O histórico completo foi arquivado na Auditoria Central).*`;
              await bot.telegram.sendMessage(managerUser.telegram_id, dossiePrivado, { parse_mode: 'Markdown' }).catch(err => console.log('Erro DM Gerente:', err.message));
           }
        }

@@ -256,7 +256,7 @@ export function setupReturnsManager(bot: Telegraf) {
                  }
               }
 
-              const dossie = `📂 **DOSSIÊ DE AUDITORIA DE DEVOLUÇÃO #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n👤 **Fiscal:** ${ticket.requester_name}\n📅 **Data Compra:** ${ticket.purchase_date}\n💵 **Ticket Total:** R$ ${ticket.total_receipt_value}\n💰 **Valor Devolvido:** R$ ${ticket.return_value}\n📦 **Produtos:** ${ticket.returned_products}\n\n✅ **Conferido e Fechado por:** ${resolverName}\n📅 **Fechamento:** ${new Date().toLocaleString('pt-BR')}`;
+              const dossie = `📂 **DOSSIÊ DE AUDITORIA DE DEVOLUÇÃO #${ticket.id}**\n\n🏬 **Loja:** ${ticket.store_name}\n👤 **Fiscal:** ${ticket.requester_name}\n📅 **Data Compra:** ${ticket.purchase_date}\n💵 **Ticket Total:** R$ ${ticket.total_receipt_value}\n💰 **Valor Devolvido:** R$ ${ticket.return_value}\n📦 **Produtos:** ${ticket.returned_products}\n\n✅ **Conferido e Fechado por:** ${resolverName}\n📅 **Fechamento:** ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
               await bot.telegram.sendMessage(auditChatId, dossie, { message_thread_id: auditThreadId, parse_mode: 'Markdown' }).catch(()=>{});
               await bot.telegram.closeForumTopic(auditChatId, auditThreadId).catch(()=>{});
            }
