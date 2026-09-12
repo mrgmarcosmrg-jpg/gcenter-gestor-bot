@@ -4,6 +4,10 @@ FROM node:20-alpine
 # Define o diretório de trabalho dentro do container
 WORKDIR /app
 
+# Força o fuso horário do sistema e do Node.js para o Brasil
+RUN apk add --no-cache tzdata
+ENV TZ="America/Sao_Paulo"
+
 # Copia os arquivos de dependência primeiro (para aproveitar o cache do Docker)
 COPY package*.json ./
 

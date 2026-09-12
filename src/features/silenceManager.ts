@@ -81,7 +81,7 @@ export function setupSilenceManager(bot: Telegraf) {
     const isWeekend = now.getDay() === 0 || now.getDay() === 6;
 
     for (const group of groups) {
-      const isWorkHours = !isWeekend && (currentTimeStr >= group.start_time && currentTimeStr < group.end_time);
+      const isWorkHours = (currentTimeStr >= group.start_time && currentTimeStr < group.end_time);
       
       try {
         if (!isWorkHours) {
@@ -97,7 +97,7 @@ export function setupSilenceManager(bot: Telegraf) {
 
     const generalGroupId = process.env.GENERAL_GROUP_ID;
     if (generalGroupId) {
-      const isWorkHours = !isWeekend && (currentTimeStr >= '07:00' && currentTimeStr < '20:00');
+      const isWorkHours = (currentTimeStr >= '07:00' && currentTimeStr < '20:00');
       try {
         await lockGroup(bot, generalGroupId, !isWorkHours);
       } catch (error) {
