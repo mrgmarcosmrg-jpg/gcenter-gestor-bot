@@ -97,9 +97,9 @@ async function start() {
   ]).catch(err => console.error('Erro ao configurar menu de comandos:', err));
 
   // Remove qualquer Webhook antigo que tenha ficado preso no Telegram (ex: da época do Supabase)
-  // Isso é obrigatório para que o bot.launch() (que usa Long Polling) funcione sem dar erro 409 Conflict.
+  // Removemos o webhook antigo caso exista, mas mantemos as mensagens pendentes para não perder tickets
   try {
-     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+     await bot.telegram.deleteWebhook({ drop_pending_updates: false });
      console.log('🧹 Webhook antigo limpo com sucesso.');
   } catch (err) {
      console.error('Aviso ao limpar webhook:', err);
