@@ -233,6 +233,27 @@ export function setupGatekeeper(bot: Telegraf) {
       await ctx.reply('Digite o **Cargo Correto** que devo registrar para este funcionário:');
    });
 
+   bot.command('configurar_grupo', async (ctx) => {
+      // Permitir apenas diretores
+      const { data: user } = await supabase.from('user_roles').select('*').eq('telegram_id', ctx.from.id.toString()).like('role', 'diretor_%').single();
+      if (!user) return;
+
+      const args = ctx.message.text.split(' ');
+      if (args.length < 3) {
+         return ctx.reply('⚠️ Uso: /configurar_grupo [setor] [nome_da_loja]\nEx: /configurar_grupo recebimento GCenter 19');
+      }
+
+      const sector = args[1].toLowerCase();
+      const storeName = args.slice(2).join(' ');
+
+      const { error } = await supabase.from('groups_config').update({ sector, store_name: storeName }).eq('chat_id', ctx.chat.id.toString());
+      
+      if (error) {
+         return ctx.reply('❌ Erro ao salvar: ' + error.message);
+      }
+      return ctx.reply(`✅ Grupo configurado com sucesso!\nSetor: ${sector}\nLoja: ${storeName}`);
+   });
+
    // Comando de Aviso Direcionado (Para Diretores) - OPÇÃO A (Marcação no grupo)
    bot.command('aviso_loja', async (ctx) => {
       if (ctx.chat.type !== 'private') return;
