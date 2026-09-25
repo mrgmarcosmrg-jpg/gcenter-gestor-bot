@@ -246,7 +246,14 @@ export function setupGatekeeper(bot: Telegraf) {
       const sector = args[1].toLowerCase();
       const storeName = args.slice(2).join(' ');
 
-      const { error } = await supabase.from('groups_config').update({ sector, store_name: storeName }).eq('chat_id', ctx.chat.id.toString());
+      const title = 'title' in ctx.chat ? ctx.chat.title : 'Grupo';
+      const { error } = await supabase.from('groups_config').upsert({ 
+         chat_id: ctx.chat.id.toString(), 
+         title: title, 
+         sector, 
+         store_name: storeName, 
+         active: true 
+      });
       
       if (error) {
          return ctx.reply('❌ Erro ao salvar: ' + error.message);
