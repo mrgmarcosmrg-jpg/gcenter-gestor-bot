@@ -678,7 +678,7 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
     const op = (ticket.operation_type || 'COMPRA').toUpperCase();
     const isSemBono = ticket.type === 'divergencia';
 
-    const topicName = `🔵 Ticket #${ticketId} - ${ticket.supplier} [${op}]`;
+    const topicName = `🔵 ${ticket.store_name} - ${ticket.supplier} - R$ ${ticket.invoice_value}`;
     
     let topic;
     try {
@@ -741,7 +741,7 @@ async function finishTicket(bot: Telegraf, ticketId: number, resolverName: strin
     }).eq('id', ticketId);
 
     const op = (ticket.operation_type || 'COMPRA').toUpperCase();
-    const closedName = `🟧 [FECHADO] Ticket #${ticket.id} - ${ticket.supplier} [${op}]`;
+    const closedName = `🟧 [FECHADO] ${ticket.store_name} - ${ticket.supplier} - R$ ${ticket.invoice_value}`;
 
     const sealMsgFaturamento = `🛑 **TICKET ENCERRADO** 🛑\n\n✅ Apuração Finalizada por: *${resolverName}*\n📌 Status: *${conclusionStatus}*\n📝 Obs: ${justificativa || 'Nenhuma'}`;
     const sealMsgRecebimento = `✅ **TICKET CONCLUÍDO** ✅\nFinalizado por *${resolverName}*\n\n📌 **Status:** ${conclusionStatus}\n📝 **Observação/Ressalva:** ${justificativa || 'Nenhuma'}\n\n🛑 *A conversa foi encerrada.*`;
