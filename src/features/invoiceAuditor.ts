@@ -481,6 +481,8 @@ export function setupInvoiceAuditor(bot: Telegraf) {
       const { data: ticket } = await supabase.from('receiving_logs').select('*').eq('id', ticketId).single();
       if (!ticket || ticket.status === 'resolvido') return ctx.answerCbQuery('Ticket já encerrado ou não encontrado.');
   
+      ctx.answerCbQuery(`Você assumiu!`).catch(()=>{});
+
       const resolverName = ctx.from.first_name;
       await supabase.from('receiving_logs').update({ assumed_by: resolverName }).eq('id', ticketId);
   
@@ -489,9 +491,6 @@ export function setupInvoiceAuditor(bot: Telegraf) {
           inline_keyboard: [[{ text: `✅ Assumido por ${resolverName}`, callback_data: `noop` }]]
         });
       } catch (e) {}
-  
-      ctx.answerCbQuery(`Você assumiu!`);
-  
       if (ticket.chat_id && ticket.recebimento_thread_id) {
           await bot.telegram.sendMessage(ticket.chat_id, `👨‍💻 A faturista *${resolverName}* assumiu a apuração! Podem trocar mensagens agora.`, { 
              message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown' 
@@ -530,6 +529,8 @@ export function setupInvoiceAuditor(bot: Telegraf) {
       const { data: ticket } = await supabase.from('receiving_logs').select('*').eq('id', ticketId).single();
       if (!ticket || ticket.status === 'resolvido') return ctx.answerCbQuery('Ticket já encerrado ou não encontrado.');
   
+      ctx.answerCbQuery(`Bono marcado como enviado!`).catch(()=>{});
+
       const faturistaName = ctx.from.first_name;
       
       await supabase.from('receiving_logs').update({ bono_sent: true }).eq('id', ticketId);
@@ -539,8 +540,6 @@ export function setupInvoiceAuditor(bot: Telegraf) {
           inline_keyboard: [[{ text: `✅ Bono enviado por ${faturistaName}`, callback_data: `noop` }]]
         });
       } catch (e) {}
-  
-      ctx.answerCbQuery(`Bono marcado como enviado!`);
   
       if (ticket.chat_id && ticket.recebimento_thread_id) {
           await bot.telegram.sendMessage(ticket.chat_id, `✅ A faturista *${faturistaName}* gerou o bono!\n\n⚠️ **ATENÇÃO RECEBEDOR:** A parte burocrática está pronta!\nPor favor, assim que a mercadoria estiver no depósito, grave um **VÍDEO BOLINHA** (de até 15 segundos) mostrando-a e envie aqui no chat. Isso é obrigatório para que a Analista possa finalizar o Bono!`, { 
