@@ -186,6 +186,9 @@ export function setupInvoiceAuditor(bot: Telegraf) {
              } else if ('document' in ctx.message) {
                 const fileId = ctx.message.document.file_id;
                 await bot.telegram.sendDocument(faturamentoChatId, fileId, { caption: `👷‍♂️ *${senderName} (Loja):*\n${text}`, message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' });
+             } else if ('video_note' in ctx.message) {
+                await bot.telegram.copyMessage(faturamentoChatId, ctx.chat.id, ctx.message.message_id, { message_thread_id: parseInt(ticket.thread_id) }).catch(()=>{});
+                await bot.telegram.sendMessage(faturamentoChatId, `👷‍♂️ *${senderName} (Loja) enviou um vídeo bolinha adicional*`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' }).catch(()=>{});
              }
          }
       }
@@ -274,18 +277,10 @@ export function setupInvoiceAuditor(bot: Telegraf) {
        if (fatGroups && fatGroups.length > 0) {
            const faturamentoChatId = fatGroups[0].chat_id;
            try {
-              const fileLink = await bot.telegram.getFileLink(ctx.message.video_note.file_id);
-              const response = await fetch(fileLink.href);
-              const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
-
-              await bot.telegram.sendVideo(faturamentoChatId, { source: buffer, filename: 'bolinha.mp4' }, {
-                 message_thread_id: parseInt(ticket.thread_id),
-                 caption: `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)\n*(Convertido para vídeo normal para funcionar no Telegram Web)*`,
-                 parse_mode: 'Markdown'
-              });
+              await bot.telegram.copyMessage(faturamentoChatId, chatId, ctx.message.message_id, { message_thread_id: parseInt(ticket.thread_id) });
+              await bot.telegram.sendMessage(faturamentoChatId, `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' });
            } catch (e) {
-              console.error('ERRO AO CONVERTER VIDEO BOLINHA:', e);
+              console.error('ERRO AO ENVIAR VIDEO BOLINHA:', e);
               await bot.telegram.copyMessage(faturamentoChatId, chatId, ctx.message.message_id, { message_thread_id: parseInt(ticket.thread_id) }).catch(()=>{});
               await bot.telegram.sendMessage(faturamentoChatId, `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' }).catch(()=>{});
            }
