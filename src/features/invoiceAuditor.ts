@@ -301,7 +301,7 @@ export function setupInvoiceAuditor(bot: Telegraf) {
   const processingAlbums = new Set<string>();
   const albumMessageIds = new Map<string, string>();
 
-  bot.on(['photo', 'voice', 'document'], async (ctx, next) => {
+  bot.on(['photo', 'voice', 'document', 'video'], async (ctx, next) => {
     console.log('--- FOTO RECEBIDA ---', JSON.stringify(ctx.message, null, 2));
     const chatId = ctx.chat.id.toString();
     const { data: group } = await supabase.from('groups_config').select('*').eq('chat_id', chatId).single();
