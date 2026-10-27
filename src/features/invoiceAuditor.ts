@@ -144,9 +144,12 @@ export function setupInvoiceAuditor(bot: Telegraf) {
            await bot.telegram.sendDocument(ticket.chat_id, fileId, { caption: `👩‍💻 *${senderName}:*\n${text}`, message_thread_id: parseInt(ticket.recebimento_thread_id), parse_mode: 'Markdown' });
         }
 
-        if (ticket.status === 'aguardando_bono') {
-           await supabase.from('receiving_logs').update({ status: 'em_andamento' }).eq('id', ticket.id);
-           const msg = await bot.telegram.sendMessage(ctx.chat.id, `✅ **BONO REGISTRADO!**\n\nFaturista, agora você já pode passar a bola para a Analista de Faturamento:`, {
+        if (ticket.status === 'aguardando_bono' || ((ticket.status === 'pendente' || ticket.status === 'em_andamento') && !ticket.bono_sent)) {
+           await supabase.from('receiving_logs').update({
+              status: 'em_andamento',
+              assumed_by: ticket.assumed_by || senderName
+           }).eq('id', ticket.id);
+           const msg = await bot.telegram.sendMessage(ctx.chat.id, `✅ **BONO REGISTRADO!**\n\nFaturista, clique abaixo para confirmar o Bono e liberar o vídeo bolinha na loja:`, {
               message_thread_id: ctx.message.message_thread_id,
               parse_mode: 'Markdown',
               reply_markup: {
@@ -188,7 +191,13 @@ export function setupInvoiceAuditor(bot: Telegraf) {
                 await bot.telegram.sendDocument(faturamentoChatId, fileId, { caption: `👷‍♂️ *${senderName} (Loja):*\n${text}`, message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' });
              } else if ('video_note' in ctx.message) {
                 await bot.telegram.copyMessage(faturamentoChatId, ctx.chat.id, ctx.message.message_id, { message_thread_id: parseInt(ticket.thread_id) }).catch(()=>{});
-                await bot.telegram.sendMessage(faturamentoChatId, `👷‍♂️ *${senderName} (Loja) enviou um vídeo bolinha adicional*`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' }).catch(()=>{});
+                await bot.telegram.sendMessage(faturamentoChatId, `👷‍♂️ *${senderName} (Loja) enviou um novo vídeo bolinha:*`, {
+                   message_thread_id: parseInt(ticket.thread_id),
+                   parse_mode: 'Markdown',
+                   reply_markup: ticket.bono_sent ? {
+                      inline_keyboard: [[{ text: `✅ Concluir Apuração (Analista)`, callback_data: `resolve_nf_${ticket.id}` }]]
+                   } : undefined
+                }).catch(()=>{});
              }
          }
       }
@@ -221,8 +230,19 @@ export function setupInvoiceAuditor(bot: Telegraf) {
       }
 
       if (ticket.status === 'draft_valor') {
+          const normalized = text.includes(',')
+            ? text.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '')
+            : text.replace(/[^\d.-]/g, '');
+          const parsedVal = parseFloat(normalized);
+          if (isNaN(parsedVal)) {
+            await ctx.telegram.sendMessage(ctx.chat.id, '⚠️ Valor inválido! Por favor, digite apenas o número do valor total (ex: 1250,50):', {
+              message_thread_id: ctx.message.message_thread_id
+            });
+            return;
+          }
+
           await supabase.from('receiving_logs').update({
-            invoice_value: parseFloat(text.replace(',', '.').replace(/[^\d.-]/g, '')), status: 'pendente'
+            invoice_value: parsedVal, status: 'pendente'
           }).eq('id', ticket.id);
           
           await ctx.telegram.sendMessage(ctx.chat.id, '✅ Tudo certo! A entrega foi enviada para o Faturamento.', { message_thread_id: ctx.message.message_thread_id });
@@ -259,7 +279,13 @@ export function setupInvoiceAuditor(bot: Telegraf) {
        .single();
 
     if (!ticket) return next();
-    if (ticket.physical_receipt_at) return next();
+    if (ticket.physical_receipt_at && ticket.analyst_notified) return next();
+
+    // Se a faturista já digitou o bono no chat (status === 'em_andamento'), mas esqueceu de clicar em "Bono Criado", libera automaticamente
+    if (!ticket.bono_sent && ticket.status === 'em_andamento') {
+       await supabase.from('receiving_logs').update({ bono_sent: true }).eq('id', ticket.id);
+       ticket.bono_sent = true;
+    }
 
     // TRAVA: Só aceita o vídeo bolinha se a faturista já digitou o bono!
     if (!ticket.bono_sent) {
@@ -278,11 +304,8 @@ export function setupInvoiceAuditor(bot: Telegraf) {
            const faturamentoChatId = fatGroups[0].chat_id;
            try {
               await bot.telegram.copyMessage(faturamentoChatId, chatId, ctx.message.message_id, { message_thread_id: parseInt(ticket.thread_id) });
-              await bot.telegram.sendMessage(faturamentoChatId, `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' });
            } catch (e) {
               console.error('ERRO AO ENVIAR VIDEO BOLINHA:', e);
-              await bot.telegram.copyMessage(faturamentoChatId, chatId, ctx.message.message_id, { message_thread_id: parseInt(ticket.thread_id) }).catch(()=>{});
-              await bot.telegram.sendMessage(faturamentoChatId, `✅ **Vídeo bolinha recebido de ${recebedorName}!** (Loja)`, { message_thread_id: parseInt(ticket.thread_id), parse_mode: 'Markdown' }).catch(()=>{});
            }
        }
     }
@@ -605,19 +628,26 @@ export function setupInvoiceAuditor(bot: Telegraf) {
     const conclusionStatus = statusMap[action as keyof typeof statusMap];
 
     if (action === 'ok') {
+      await ctx.answerCbQuery('Ticket concluído!').catch(()=>{});
+      await ctx.editMessageText(`✅ **${conclusionStatus}**\n\nTicket finalizado por ${resolverName}.`, { parse_mode: 'Markdown' }).catch(()=>{});
       await finishTicket(bot, parseInt(ticketId), resolverName, conclusionStatus, '');
-      await ctx.editMessageText(`✅ **${conclusionStatus}**\n\nTicket finalizado por ${resolverName}.`, { parse_mode: 'Markdown' });
-      ctx.answerCbQuery('Ticket concluído!');
     } else {
+      await ctx.answerCbQuery('Aguardando texto...').catch(()=>{});
       await supabase.from('receiving_logs').update({ 
         status: 'aguardando_justificativa', 
         conclusion_status: conclusionStatus,
         resolved_by: resolverName 
       }).eq('id', ticketId);
 
-      await ctx.editMessageText(`📌 Selecionado: **${conclusionStatus}**\n\n✍️ **Por favor, digite abaixo a descrição/motivo da ressalva ou devolução:**\n_(O ticket será encerrado automaticamente assim que você enviar o texto)_`, { parse_mode: 'Markdown' });
-      ctx.answerCbQuery('Aguardando texto...');
+      await ctx.editMessageText(`📌 Selecionado: **${conclusionStatus}**\n\n✍️ **Por favor, digite abaixo a descrição/motivo da ressalva ou devolução:**\n_(O ticket será encerrado automaticamente assim que você enviar o texto)_`, { parse_mode: 'Markdown' }).catch(()=>{});
     }
+  });
+
+  bot.action(/^retry_fat_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery('Reenviando para o Faturamento...').catch(()=>{});
+    const ticketId = parseInt(ctx.match[1]);
+    await ctx.editMessageText('🔄 Reenviando entrega para a Central de Faturamento...').catch(()=>{});
+    await forwardToFaturamento(bot, ticketId);
   });
 
 
@@ -674,32 +704,34 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
 
     const topicName = `🔵 ${ticket.store_name} - ${ticket.supplier} - R$ ${ticket.invoice_value}`;
     
-    let topic;
-    try {
-      topic = await bot.telegram.createForumTopic(faturamentoChatId, topicName);
-    } catch (createErr: any) {
-      console.error('ERRO AO CRIAR TOPICO NO FATURAMENTO:', createErr);
-      if (ticket.chat_id) {
-         await bot.telegram.sendMessage(ticket.chat_id, `❌ Falha ao repassar o ticket pro Faturamento! Erro: ${createErr.message}`, {
-            message_thread_id: ticket.recebimento_thread_id ? parseInt(ticket.recebimento_thread_id) : undefined
-         });
+    let threadId: number;
+    if (ticket.thread_id) {
+      threadId = parseInt(ticket.thread_id);
+    } else {
+      let topic;
+      try {
+        topic = await bot.telegram.createForumTopic(faturamentoChatId, topicName);
+      } catch (createErr: any) {
+        console.error('ERRO AO CRIAR TOPICO NO FATURAMENTO:', createErr);
+        if (ticket.chat_id) {
+           await bot.telegram.sendMessage(ticket.chat_id, `❌ Falha temporária ao repassar o ticket pro Faturamento (${createErr.message}). Clique abaixo para reenviar:`, {
+              message_thread_id: ticket.recebimento_thread_id ? parseInt(ticket.recebimento_thread_id) : undefined,
+              reply_markup: {
+                 inline_keyboard: [[{ text: '🔄 Tentar Reenviar p/ Faturamento', callback_data: `retry_fat_${ticketId}` }]]
+              }
+           });
+        }
+        return;
       }
-      return;
+      if (!topic) return;
+      threadId = topic.message_thread_id;
+      await supabase.from('receiving_logs').update({ thread_id: threadId.toString() }).eq('id', ticketId);
     }
-    if (!topic) return;
-    
-    const threadId = topic.message_thread_id;
-    await supabase.from('receiving_logs').update({ thread_id: threadId.toString() }).eq('id', ticketId);
 
     // Renomear o tópico do Recebimento para combinar!
     if (ticket.chat_id && ticket.recebimento_thread_id) {
        await bot.telegram.editForumTopic(ticket.chat_id, parseInt(ticket.recebimento_thread_id), { name: topicName }).catch(()=>{});
     }
-
-    const subtitle = isSemBono ? '(Sem Bono)' : '(Com Bono)';
-    const summary = `🔴 *NOVA APURAÇÃO ${subtitle} - #${ticketId} [${op}]*\n_Atenção Faturistas_\n\n🏬 *Loja:* ${ticket.store_name}\n👤 *Recebedor:* ${ticket.requester_name}\n🏷 *Fornecedor:* ${ticket.supplier}\n💰 *Valor:* R$ ${ticket.invoice_value}\n`;
-
-    await bot.telegram.sendMessage(faturamentoChatId, summary, { message_thread_id: threadId, parse_mode: 'Markdown' });
 
     if (ticket.chat_id && ticket.original_message_id) {
       const photos = ticket.original_message_id.split(',');
@@ -709,10 +741,13 @@ async function forwardToFaturamento(bot: Telegraf, ticketId: number) {
       }
     }
 
+    const subtitle = isSemBono ? '(Sem Bono)' : '(Com Bono)';
+    const summary = `🔴 *NOVA APURAÇÃO ${subtitle} - #${ticketId} [${op}]*\n_Atenção Faturistas_\n\n🏬 *Loja:* ${ticket.store_name}\n👤 *Recebedor:* ${ticket.requester_name}\n🏷 *Fornecedor:* ${ticket.supplier}\n💰 *Valor:* R$ ${ticket.invoice_value}\n\n👆 *Escolha uma ação abaixo:*`;
     const inline_keyboard = [[{ text: '✋ Assumir Apuração', callback_data: `assume_nf_${ticketId}` }]];
 
-    await bot.telegram.sendMessage(faturamentoChatId, `👆 Escolha uma ação:`, {
+    await bot.telegram.sendMessage(faturamentoChatId, summary, {
       message_thread_id: threadId,
+      parse_mode: 'Markdown',
       reply_markup: { inline_keyboard }
     });
 
@@ -796,8 +831,6 @@ async function checkReadyForAnalysis(bot: Telegraf, ticketId: number) {
     const isVideoReady = !!ticket.physical_receipt_at;
 
     if (isBonoReady && isVideoReady) {
-        await supabase.from('receiving_logs').update({ analyst_notified: true }).eq('id', ticketId);
-        
         const { data: fatGroups } = await supabase.from('groups_config').select('chat_id').eq('sector', 'faturamento');
         if (fatGroups && fatGroups.length > 0) {
              const faturamentoChatId = fatGroups[0].chat_id;
@@ -808,6 +841,7 @@ async function checkReadyForAnalysis(bot: Telegraf, ticketId: number) {
                  inline_keyboard: [[{ text: `✅ Concluir Apuração (Analista)`, callback_data: `resolve_nf_${ticketId}` }]]
                }
              });
+             await supabase.from('receiving_logs').update({ analyst_notified: true }).eq('id', ticketId);
              await bot.telegram.pinChatMessage(faturamentoChatId, msg.message_id).catch(()=>{});
         }
     }

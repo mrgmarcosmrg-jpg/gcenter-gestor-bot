@@ -337,6 +337,40 @@ export async function setupDatabase() {
       );
     `);
 
+    try {
+      await client.query(`ALTER TABLE receiving_logs ADD COLUMN IF NOT EXISTS analyst_notified BOOLEAN DEFAULT FALSE;`);
+    } catch (e) {}
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pending_questions (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        chat_id VARCHAR(255),
+        message_id VARCHAR(255),
+        asker_id VARCHAR(255),
+        asker_name VARCHAR(255),
+        target_user VARCHAR(255),
+        question_text TEXT,
+        resolved BOOLEAN DEFAULT FALSE,
+        escalated BOOLEAN DEFAULT FALSE,
+        resolved_at TIMESTAMP WITH TIME ZONE
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS financial_goals (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        chat_id VARCHAR(255),
+        store_name VARCHAR(255),
+        target_date VARCHAR(50),
+        goal_value VARCHAR(100),
+        achieved_value VARCHAR(100),
+        charge_message_id VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'pendente'
+      );
+    `);
+
     client.release();
     console.log('✅ Tabelas criadas/verificadas com sucesso no PostgreSQL Nativo.');
   } catch (error) {

@@ -66,42 +66,55 @@ export function setupSilenceManager(bot: Telegraf) {
     ctx.reply(`Horário de expediente configurado: das ${startTime} às ${endTime}. Fora desse horário o grupo será silenciado.`);
   });
 
+  // Guarda em memória o último estado aplicado por grupo para NÃO chamar a API do Telegram a cada minuto sem necessidade
+  const lastLockState = new Map<string, boolean>();
+
   // Job a cada minuto para verificar quem silenciar ou liberar
   cron.schedule('* * * * *', async () => {
     const { data: groups } = await supabase.from('groups_config').select('*').eq('active', true);
     if (!groups) return;
 
     const now = new Date();
-    // Pega hora no fuso horário do Brasil (ajustar conforme necessidade)
     const options = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false } as const;
-    const currentTimeStr = now.toLocaleTimeString('pt-BR', options); // ex: "20:05"
-    
-    // Simplificando verificação para dias úteis vs fim de semana
-    // No JS, 0 é domingo, 6 é sábado
-    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+    const currentTimeStr = now.toLocaleTimeString('pt-BR', options);
 
     for (const group of groups) {
+      // Não altera permissões de grupos operacionais de tickets (Faturamento, Recebimento, Auditoria)
+      if (group.sector && ['faturamento', 'recebimento', 'auditoria', 'auditoria_devolucoes'].includes(group.sector)) {
+        continue;
+      }
+      if (!group.start_time || !group.end_time) continue;
+
       const isWorkHours = (currentTimeStr >= group.start_time && currentTimeStr < group.end_time);
-      
+      const shouldLock = !isWorkHours;
+
+      if (lastLockState.get(group.chat_id) === shouldLock) {
+        continue; // Estado já aplicado, evita gastar limite da API do Telegram
+      }
+
       try {
-        if (!isWorkHours) {
-          // Fora de expediente - Silenciar
-          await lockGroup(bot, group.chat_id, true);
-        } else {
-          await lockGroup(bot, group.chat_id, false);
+        await lockGroup(bot, group.chat_id, shouldLock);
+        lastLockState.set(group.chat_id, shouldLock);
+      } catch (error: any) {
+        const desc = error?.response?.description || '';
+        if (desc.includes('upgraded to a supergroup')) {
+          await supabase.from('groups_config').update({ active: false }).eq('chat_id', group.chat_id);
         }
-      } catch (error) {
-        console.error(`Erro ao mudar permissão do grupo ${group.chat_id}:`, error);
+        lastLockState.set(group.chat_id, shouldLock);
       }
     }
 
     const generalGroupId = process.env.GENERAL_GROUP_ID;
     if (generalGroupId) {
       const isWorkHours = (currentTimeStr >= '07:00' && currentTimeStr < '20:00');
-      try {
-        await lockGroup(bot, generalGroupId, !isWorkHours);
-      } catch (error) {
-        console.error(`Erro ao mudar permissão do grupo geral ${generalGroupId}:`, error);
+      const shouldLock = !isWorkHours;
+      if (lastLockState.get(generalGroupId) !== shouldLock) {
+        try {
+          await lockGroup(bot, generalGroupId, shouldLock);
+          lastLockState.set(generalGroupId, shouldLock);
+        } catch (error) {
+          lastLockState.set(generalGroupId, shouldLock);
+        }
       }
     }
   }, {

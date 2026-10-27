@@ -25,6 +25,51 @@ if (!token) {
 
 const bot = new Telegraf(token);
 
+// Wrapper global na API do Telegram para tratar Rate Limit (Erro 429) e quedas rápidas de rede automaticamente
+const originalCallApi = bot.telegram.callApi.bind(bot.telegram);
+(bot.telegram as any).callApi = async function (method: string, payload: any, callOpts?: any) {
+  const maxRetries = 5;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await originalCallApi(method as any, payload, callOpts);
+    } catch (err: any) {
+      const errorCode = err?.response?.error_code;
+      const description = err?.response?.description || err?.message || '';
+
+      // Ignora silenciosamente se a mensagem para editar/deletar já não existir
+      if (errorCode === 400 && (description.includes('message is not modified') || description.includes('message to edit not found'))) {
+        throw err;
+      }
+
+      // Se for Erro 429 (Too Many Requests), aguarda o tempo exigido pelo Telegram e tenta de novo
+      if (errorCode === 429 && attempt < maxRetries) {
+        const retryAfter = (err?.response?.parameters?.retry_after || 15) + 1;
+        console.warn(`⏳ [Telegram 429] Limite de envios atingido no método "${method}". Aguardando ${retryAfter}s para reenviar (Tentativa ${attempt}/${maxRetries})...`);
+        await new Promise((r) => setTimeout(r, retryAfter * 1000));
+        continue;
+      }
+
+      // Se for falha temporária de rede/socket, aguarda 2s e tenta novamente
+      const isNetworkError = !errorCode && (
+        err?.code === 'ECONNRESET' ||
+        err?.code === 'ETIMEDOUT' ||
+        err?.code === 'ENOTFOUND' ||
+        err?.code === 'EAI_AGAIN' ||
+        description.includes('socket hang up') ||
+        description.includes('fetch failed') ||
+        description.includes('network')
+      );
+      if (isNetworkError && attempt < maxRetries) {
+        console.warn(`🌐 [Rede] Oscilação ao chamar "${method}". Retentando em ${attempt * 2}s (Tentativa ${attempt}/${maxRetries})...`);
+        await new Promise((r) => setTimeout(r, attempt * 2000));
+        continue;
+      }
+
+      throw err;
+    }
+  }
+};
+
 // Comando para limpar teclados antigos presos na tela
 bot.command('limpar', async (ctx) => {
   await ctx.reply('🧹 Limpando botões antigos da tela...', {
